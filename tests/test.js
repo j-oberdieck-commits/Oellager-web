@@ -317,6 +317,17 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.waitForSelector(".geteilt .detail");
   ok("Breiter Bildschirm: Liste links, Details rechts", await page.isVisible(".geteilt .detail .sorte"));
   await page.screenshot({ path: SCHIRM + "10-tablet.png" });
+  // Oberflächen (Entwickler wählt für den Standort)
+  await page.setViewportSize({ width: 412, height: 900 });
+  for (const [ob, merkmal] of [["dunkel", null], ["kompakt", ".kp-tabelle"], ["kennzahlen", ".kz-karte"], ["glas", null]]) {
+    await entwickler(page);
+    await page.click(`[data-a="ob-setzen"][data-v="${ob}"]`);
+    await page.click('#dialog [data-a="schliessen"]');
+    await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
+    const gesetzt = await page.evaluate(() => document.documentElement.dataset.ob || "glas");
+    ok(`Oberfläche ${ob} aktiv${merkmal ? " mit " + merkmal : ""}`, gesetzt === ob && db.bestand[1].daten.einstellungen.oberflaeche === ob && (!merkmal || await page.isVisible(merkmal)));
+    await page.screenshot({ path: SCHIRM + `ob-${ob}.png` });
+  }
   // Zwei-Faktor-Anmeldung
   await page.setViewportSize({ width: 412, height: 900 });
   db.nutzer.push({ user_id: "u-mfa", email: "mfa@test.de", name: "Mia", rolle: "nutzer", freigegeben: true, mfa: true });

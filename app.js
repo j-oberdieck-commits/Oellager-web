@@ -187,6 +187,15 @@ async function standortOeffnen(id) {
   await laden();
 }
 const standortName = () => S.standorte.find((x) => x.id === S.standort)?.name || "";
+const oberflaeche = () => (S.ansicht === "app" && S.daten?.einstellungen?.oberflaeche) || "glas";
+function oberflaecheAnwenden() {
+  const o = oberflaeche(), r = document.documentElement;
+  if (o === "glas") delete r.dataset.ob; else r.dataset.ob = o;
+}
+const OBERFLAECHEN = [["glas", "Glas", "Glaskacheln auf farbigem Hintergrund – wie bisher"],
+  ["dunkel", "Werkstatt dunkel", "Fast schwarz, große Zahlen, Bernstein als Akzent"],
+  ["kompakt", "Klar & kompakt", "Weiß, als Liste – viele Sorten auf einen Blick"],
+  ["kennzahlen", "Übersicht mit Kennzahlen", "Kennzahlen-Karte oben, Kacheln zu zweit"]];
 const darfAendern = () => !S.offline && (S.ich?.rolle === "admin" || S.aenderbar.has(S.standort));
 const istEntwickler = () => S.ich?.rolle === "admin" && S.ich?.freigegeben;
 const wartendeAnzahl = () => (istEntwickler() ? S.nutzer.filter((n) => !n.freigegeben).length : 0);
@@ -303,6 +312,7 @@ function kopfZeichnen() {
 }
 
 function zeichnen() {
+  oberflaecheAnwenden();
   kopfZeichnen();
   const app = $("#app");
   if (S.ansicht !== "app") {
@@ -457,6 +467,10 @@ function verwaltungDialog() {
       <button class="knopf" data-a="sicherungen">Sicherungen</button>
       <button class="knopf" data-a="anmeldungen">Anmelde-Protokoll</button>
       <button class="knopf" data-a="fehlerberichte">Fehlerberichte</button></div>
+    ${S.ansicht === "app" ? `<div class="abschnitt-titel">Oberfläche für alle am Standort ${esc(standortName())}</div>
+    <div class="glas">${OBERFLAECHEN.map(([w, t, b]) => `<label class="liste-zeile" style="cursor:pointer"><input type="radio" name="ob" data-a="ob-setzen" data-v="${w}" ${oberflaeche() === w ? "checked" : ""}>
+      <div style="flex:1"><b>${t}</b><div class="neben">${b}</div></div></label>`).join("")}</div>
+    <p class="neben" style="margin:0">Gilt für alle Nutzer dieses Standorts, in App und Web-App.</p>` : ""}
     <div class="abschnitt-titel">Neuer Standort</div>
     <input type="text" id="neuer-standort" placeholder="Name, z. B. Werkstatt Nord" value="${esc(S.neuerName || "")}">
     ${S.standorte.length ? `<label class="feld"><span>Lieferanten übernehmen von</span><select id="quelle" data-a="quelle-waehlen">
@@ -626,6 +640,20 @@ async function verwalten(aktion, erfolg) {
 
 function summenHtml(sorten, faesser) {
   const sch = schnitt(faesser);
+  if (oberflaeche() === "kennzahlen") {
+    const lps = faesser.map(literpreis), min = Math.min(...lps), max = Math.max(...lps);
+    const pos = sch != null && max - min > 0.005 ? Math.round((sch - min) / (max - min) * 100) : null;
+    return `<section class="kz-karte" aria-label="Kennzahlen">
+      <div class="reihe" style="align-items:flex-end"><div style="flex:1"><div class="hell">Ø Literpreis ${S.preisModus === "kunde" ? "Kundenpreis" : S.preisModus}</div><div class="kz-gross">${sch != null ? fmtP(sch) : "–"}</div></div>
+        <div style="text-align:right"><b style="font-size:24px">${faesser.length}</b><div class="hell">Fässer</div></div>
+        <div style="text-align:right;margin-left:14px"><b style="font-size:24px">${sorten.length}</b><div class="hell">Sorten</div></div></div>
+      ${pos != null ? `<div class="kz-balken"><i style="left:${pos}%"></i></div><div class="reihe hell"><span style="flex:1">günstigstes Fass ${fmtP(min)}</span><span>teuerstes ${fmtP(max)}</span></div>` : ""}
+    </section>`;
+  }
+  if (oberflaeche() === "kompakt") {
+    return `<div class="reihe neben" style="margin-top:12px;justify-content:space-between"><span><b style="color:var(--text)">${faesser.length}</b> Fässer · <b style="color:var(--text)">${sorten.length}</b> Sorten</span>
+      <span>Ø <b style="color:var(--text)">${sch != null ? fmtP(sch) : "–"}</b> / L</span></div>`;
+  }
   return `<div class="raster3" style="margin-top:12px">
     <div class="glas kachel-zahl"><div class="l">Sorten</div><div class="w">${sorten.length}</div></div>
     <div class="glas kachel-zahl"><div class="l">Fässer</div><div class="w">${faesser.length}</div></div>
@@ -651,6 +679,8 @@ function lagerHtml() {
     .some((t) => String(t || "").toLowerCase().includes(q));
   const gefiltert = gs.map((g) => ({ ...g, sorten: g.sorten.filter(passt) })).filter((g) => g.sorten.length);
   if (!gefiltert.length) return html + `<div class="glas leer" style="margin-top:12px">${q ? "Keine Treffer." : `Noch keine ${KATEGORIEN[S.kat].titel}-Sorten. Lege oben eine an.`}</div>`;
+  if (oberflaeche() === "kompakt") return html + kompaktHtml(gefiltert, q, farbe);
+  if (oberflaeche() === "kennzahlen" && !istBreit()) return html + kennzahlenHtml(gefiltert, q, farbe);
   // Tablet/PC: Liste links, Details der gewählten Viskosität rechts
   const geteilt = istBreit();
   const auswahl = geteilt ? (gefiltert.find((g) => g.key === S.offen) || gefiltert[0]) : null;
@@ -686,6 +716,39 @@ function lagerHtml() {
   return html + `</div>`;
 }
 const istBreit = () => window.innerWidth >= 1000;
+
+/** Oberfläche „Klar & kompakt“: eine Tabellenzeile je Viskosität, aufgeklappt mit den Sorten darunter. */
+function kompaktHtml(gruppen, q, farbe) {
+  return `<div class="kp-tabelle"><div class="kp-kopf"><span>Visk.</span><span>Marken</span><span class="r">Fässer</span><span class="r">ab € / L</span></div>
+    ${gruppen.map((g) => {
+      const f = gruppenFarbe(g.key, S.kat), lps = g.faesser.map(literpreis), ab = lps.length ? Math.min(...lps) : null, bis = lps.length ? Math.max(...lps) : null;
+      const offen = q || S.offen === g.key;
+      const marken = [...new Set(g.sorten.map((s) => s.marke || s.name).filter(Boolean))].join(" · ");
+      return `<div class="kp-zeile ${offen ? "offen" : ""}" data-a="gruppe" data-v="${esc(g.key)}" role="button" tabindex="0" aria-expanded="${!!offen}">
+          <span style="display:flex;align-items:center;gap:8px;font-weight:800"><span style="width:10px;height:10px;border-radius:50%;background:${f}"></span>${esc(g.titel)}</span>
+          <span style="min-width:0"><span style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(marken || "Ohne Marke")}</span><span class="neben">${g.sorten.length} Sorten${bis != null && bis !== ab ? " · bis " + fmtP(bis) : ""}</span></span>
+          <span class="r" style="font-weight:700">${g.faesser.length}</span>
+          <span class="r preis ${ab != null ? farbe(ab) : ""}">${ab != null ? `<span class="preis-gross" style="font-size:17px">${fmtP(ab)}</span>` : "–"}</span></div>
+        ${offen ? `<div class="innen" style="padding-left:8px">${g.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div>` : ""}`;
+    }).join("")}</div>`;
+}
+
+/** Oberfläche „Übersicht mit Kennzahlen“: Kacheln zu zweit, Details darunter. */
+function kennzahlenHtml(gruppen, q, farbe) {
+  const offen = gruppen.find((g) => g.key === S.offen);
+  return `<div class="kz-raster">${gruppen.map((g) => {
+      const f = gruppenFarbe(g.key, S.kat), lps = g.faesser.map(literpreis), ab = lps.length ? Math.min(...lps) : null, bis = lps.length ? Math.max(...lps) : null;
+      return `<div class="kz-kachel ${offen === g ? "gewaehlt" : ""}" data-a="gruppe" data-v="${esc(g.key)}" role="button" tabindex="0" style="${offen === g ? "outline:2px solid var(--primary)" : ""}">
+        <div class="band" style="background:${f}"></div><div class="inhalt">
+          <div class="reihe" style="justify-content:space-between;gap:6px"><b style="font-size:21px;color:${f};white-space:nowrap">${esc(g.titel)}</b>
+            <span class="pille" style="background:${f}22;color:${f};font-weight:700;white-space:nowrap;margin:0">${g.faesser.length} ${g.faesser.length === 1 ? "Fass" : "Fässer"}</span></div>
+          <div class="neben" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc([...new Set(g.sorten.map((s) => s.marke || s.name).filter(Boolean))].join(" · ") || "Ohne Marke")}</div>
+          <div class="preis ${ab != null ? farbe(ab) : ""}" style="text-align:left">${ab != null ? `<span class="preis-gross" style="font-size:24px">${fmtP(ab)}</span>` : `<span class="neben">Kein Fass</span>`}</div>
+          <div class="neben" style="font-size:12px">${ab != null ? (bis !== ab ? "ab · bis " + fmtP(bis) : "pro Liter") : ""}</div></div></div>`;
+    }).join("")}
+    ${darfAendern() ? `<button class="kz-kachel" data-a="sorte-neu" style="border:2px dashed var(--kante);background:transparent;min-height:140px;font-weight:700;color:var(--primary)">+ Neue Sorte</button>` : ""}</div>
+    ${offen ? `<div class="glas" style="margin-top:12px"><div class="innen" style="border-top:0;padding-left:16px">${offen.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div></div>` : ""}`;
+}
 
 function sorteImLagerHtml(s, farbe) {
   const fs = faesserVon(s.id).sort((a, b) => String(a.lagerplatz).localeCompare(String(b.lagerplatz), "de"));
@@ -1223,6 +1286,9 @@ document.addEventListener("click", async (e) => {
       break;
     }
     case "fahrzeug": fahrzeugDialog(); break;
+    case "ob-setzen":
+      S.daten.einstellungen = { ...(S.daten.einstellungen || {}), oberflaeche: v }; geaendert(); verwaltungDialog();
+      toast("Oberfläche „" + OBERFLAECHEN.find((x) => x[0] === v)[1] + "“ für alle am Standort gespeichert"); break;
     case "menue": S.menueOffen = !S.menueOffen; kopfZeichnen(); break;
     case "zwei-faktor": zweiFaktorDialog(); break;
     case "zf-einrichten": zweiFaktorEinrichten(); break;
