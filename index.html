@@ -136,6 +136,9 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 .login { max-width: 420px; margin: 12vh auto 0; padding: 24px; display: grid; gap: 14px; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(88px + env(safe-area-inset-bottom)); z-index: 20;
   background: var(--text); color: var(--hinter-b); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100vw - 32px); }
+body.nur-lesen [data-a="sorte-neu"], body.nur-lesen [data-a="fass-neu"], body.nur-lesen [data-v="neu"],
+body.nur-lesen [data-a$="-speichern"], body.nur-lesen [data-a$="-loeschen"] { display: none !important; }
+.banner { margin-top: 12px; padding: 8px 12px; border-radius: 12px; background: rgba(31,78,95,.12); font-size: 13px; }
 @media (min-width: 760px) {
   .raster-gruppen { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 }
@@ -169,7 +172,7 @@ const KATEGORIEN = {
 // ---------- Zustand ----------
 const S = {
   sitzung: null, daten: null, version: null, geaendert: "", geraet: "", basis: null,
-  ansicht: "anmelden", standorte: [], meine: new Set(), ich: null, nutzer: [],
+  ansicht: "anmelden", standorte: [], meine: new Set(), aenderbar: new Set(), ich: null, nutzer: [], quellLieferanten: [],
   standort: Number(localStorage.getItem("oel_standort")) || null, meldung: "", laeuft: false,
   tab: "lager", kat: "OEL", offen: null, suche: "", ungespeichert: false, speichert: false, fehler: "",
   brutto: localStorage.getItem("oel_brutto") === "1", mwst: 19
@@ -270,7 +273,8 @@ async function rest(methode, pfad, body, extra = {}) {
   const text = await r.text();
   if (!r.ok) {
     const m = (() => { try { return JSON.parse(text).message; } catch (e) { return text; } })() || `HTTP ${r.status}`;
-    throw new Error(/duplicate/i.test(m) ? "Diesen Namen gibt es schon" : /Kein Zugriff/i.test(m) ? "Kein Zugriff auf diesen Standort"
+    throw new Error(/duplicate/i.test(m) ? "Diesen Namen gibt es schon" : /Kein Zugriff/i.test(m) ? "Kein Zugriff auf diesen Standort" : /Nur Leserechte/i.test(m) ? "Nur Leserechte für diesen Standort"
+      : /row-level security/i.test(m) ? "Keine Berechtigung – nur der Entwickler darf das"
       : /mindestens ein Admin/i.test(m) ? "Es muss mindestens ein Admin bleiben" : /Nur für Admins/i.test(m) ? "Nur Admins dürfen das" : m);
   }
   return text ? JSON.parse(text) : null;
@@ -288,11 +292,18 @@ async function verwaltungLaden() {
   S.ich = ich[0] || null;
   await standorteLaden();
   if (!S.ich?.freigegeben) return;
-  S.meine = new Set((await rest("GET", `/rest/v1/oellager_mitglied?select=standort_id&user_id=eq.${uid}`)).map((m) => m.standort_id));
   if (S.ich.rolle === "admin") {
-    const zu = await rest("GET", "/rest/v1/oellager_mitglied?select=user_id,standort_id");
+    // Entwickler: alle Standorte, überall ändern
+    S.meine = new Set(S.standorte.map((x) => x.id)); S.aenderbar = new Set(S.meine);
+    const zu = await rest("GET", "/rest/v1/oellager_mitglied?select=user_id,standort_id,darf_aendern");
     S.nutzer = (await rest("GET", "/rest/v1/oellager_nutzer?select=user_id,email,name,rolle,freigegeben&order=erstellt"))
-      .map((n) => ({ ...n, standorte: new Set(zu.filter((z) => z.user_id === n.user_id).map((z) => z.standort_id)) }));
+      .map((n) => {
+        const z = zu.filter((x) => x.user_id === n.user_id);
+        return { ...n, standorte: new Set(z.map((x) => x.standort_id)), aendern: new Set(z.filter((x) => x.darf_aendern).map((x) => x.standort_id)) };
+      });
+  } else {
+    const m = await rest("GET", `/rest/v1/oellager_mitglied?select=standort_id,darf_aendern&user_id=eq.${uid}`);
+    S.meine = new Set(m.map((x) => x.standort_id)); S.aenderbar = new Set(m.filter((x) => x.darf_aendern).map((x) => x.standort_id));
   }
 }
 /** Nach der Anmeldung: Freigabe prüfen, dann gewählten Standort öffnen oder zur Standortwahl. */
@@ -311,6 +322,8 @@ async function standortOeffnen(id) {
   await laden();
 }
 const standortName = () => S.standorte.find((x) => x.id === S.standort)?.name || "";
+const darfAendern = () => S.ich?.rolle === "admin" || S.aenderbar.has(S.standort);
+const istEntwickler = () => S.ich?.rolle === "admin" && S.ich?.freigegeben;
 
 async function laden() {
   const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version,geaendert,geraet,geaendert_von&standort_id=eq.${S.standort}`);
@@ -413,6 +426,7 @@ function zeichnen() {
   }
   if (!S.daten) { app.innerHTML = `<div class="leer">Wird geladen …</div>`; return; }
   $("#tabs").hidden = false;
+  document.body.classList.toggle("nur-lesen", !darfAendern());
   $("#tabs").innerHTML = `<div class="seg" role="tablist">${[["lager", "Lager"], ["sorten", "Sorten"], ["preise", "Preise"], ["stamm", "Stammdaten"]]
     .map(([t, n]) => `<button role="tab" aria-pressed="${S.tab === t}" data-a="tab" data-v="${t}">${n}</button>`).join("")}</div>`;
 
@@ -421,6 +435,7 @@ function zeichnen() {
     html += `<div class="seg" style="margin-top:12px">${Object.entries(KATEGORIEN)
       .map(([k, v]) => `<button aria-pressed="${S.kat === k}" data-a="kat" data-v="${k}">${v.titel}</button>`).join("")}</div>`;
   }
+  if (!darfAendern()) html += `<div class="banner">🔒 Nur Leserechte an diesem Standort</div>`;
   html += ({ lager: lagerHtml, sorten: sortenHtml, preise: preiseHtml, stamm: stammHtml })[S.tab]();
   app.innerHTML = html;
 }
@@ -457,7 +472,7 @@ function registrierHtml() {
     <div class="feld"><span class="neben">Standorte (einen oder mehrere)</span>
       ${S.standorte.length ? `<div class="chips" id="r-standorte">${S.standorte.map((x) => `<button type="button" class="chip" data-sid="${x.id}" aria-pressed="false">${esc(x.name)}</button>`).join("")}</div>`
         : `<span class="neben">Noch keine Standorte – der erste Nutzer legt sie nach der Anmeldung an.</span>`}</div>
-    <p class="neben" style="margin:0">Nach der Registrierung muss ein Admin dein Konto freigeben.</p>
+    <p class="neben" style="margin:0">Nach der Registrierung muss der Entwickler dein Konto freigeben. Neue Nutzer haben zunächst nur Leserechte.</p>
     ${meldungHtml()}${warten()}
     <button class="knopf haupt" type="submit" ${S.laeuft ? "disabled" : ""}>Konto anlegen</button>
     <button class="knopf" type="button" data-a="zu-anmelden">Zurück zur Anmeldung</button>
@@ -466,7 +481,7 @@ function registrierHtml() {
 
 function warteHtml() {
   return `<div class="login glas"><h2 style="margin:0">Warten auf Freigabe</h2>
-    <p style="margin:0">Dein Konto ${esc(S.sitzung?.email)} ist angelegt. Ein Admin muss es noch freigeben – danach geht es hier weiter.</p>
+    <p style="margin:0">Dein Konto ${esc(S.sitzung?.email)} ist angelegt. Der Entwickler muss es noch freigeben – danach geht es hier weiter.</p>
     ${meldungHtml()}<button class="knopf haupt" data-a="freigabe-pruefen">Erneut prüfen</button></div>`;
 }
 
@@ -475,7 +490,7 @@ function standortWahlHtml() {
   return `<div class="login glas"><h2 style="margin:0">Standort wählen</h2>
     <p class="neben" style="margin:0">Angemeldet als ${esc(S.ich?.name || S.sitzung?.email)}</p>
     ${liste.length ? liste.map((x) => `<button class="knopf haupt" data-a="standort-oeffnen" data-v="${x.id}">${esc(x.name)}</button>`).join("")
-      : `<p style="margin:0">Dir ist noch kein Standort zugeordnet. Lege einen an oder ordne dich einem zu (Entwicklermenü-PIN).</p>`}
+      : `<p style="margin:0">${istEntwickler() ? "Noch kein Standort angelegt – über „Standorte verwalten“ anlegen." : "Dir ist noch kein Standort zugeordnet. Bitte den Entwickler, dich zuzuordnen."}</p>`}
     ${meldungHtml()}<button class="knopf" data-a="entwickler">Standorte verwalten</button></div>`;
 }
 
@@ -494,31 +509,54 @@ function pinPruefen() {
   else { $("#pin").value = ""; $("#pin-fehler").textContent = "Falsche PIN"; }
 }
 function verwaltungDialog() {
-  const admin = S.ich?.rolle === "admin";
   const theme = document.documentElement.dataset.theme || "system";
+  const darstellung = `<div class="abschnitt-titel">Darstellung</div>
+    <div class="seg">${[["system", "Wie System"], ["light", "Hell"], ["dark", "Dunkel"]].map(([w, t]) => `<button aria-pressed="${theme === w}" data-a="thema-setzen" data-v="${w}">${t}</button>`).join("")}</div>`;
+  if (!istEntwickler()) {
+    dialog("Entwicklermenü", `<p style="margin:0">Standorte und Rechte verwaltet der Entwickler.</p>${darstellung}`, `<button class="knopf haupt" data-a="schliessen">Fertig</button>`);
+    return;
+  }
+  const quelle = Number(S.quelle) || "";
   dialog("Entwicklermenü", `
-    <div class="abschnitt-titel" style="margin-top:0">Meine Standorte</div>
-    <div class="glas">${S.standorte.map((x) => `<div class="liste-zeile" style="cursor:default;flex-wrap:wrap">
-        <label class="reihe" style="flex:1 1 160px;min-width:0;cursor:pointer"><input type="checkbox" data-a="mein-standort" data-v="${x.id}" ${S.meine.has(x.id) ? "checked" : ""} style="width:20px;height:20px">
-        <span><b>${esc(x.name)}</b>${x.id === S.standort && S.ansicht === "app" ? ` <span class="pille">geöffnet</span>` : ""}</span></label>
+    <div class="abschnitt-titel" style="margin-top:0">Standorte</div>
+    <div class="glas">${S.standorte.map((x) => {
+      const offen = x.id === S.standort && S.ansicht === "app";
+      const n = S.nutzer.filter((u) => u.standorte.has(x.id)).length;
+      return `<div class="liste-zeile" style="cursor:default;flex-wrap:wrap">
+        <div style="flex:1 1 140px"><b>${esc(x.name)}</b> ${offen ? `<span class="pille">geöffnet</span>` : ""}<div class="neben">${n} Nutzer</div></div>
         <div class="reihe" style="margin-left:auto;gap:6px">
-        ${S.meine.has(x.id) && !(x.id === S.standort && S.ansicht === "app") ? `<button class="knopf klein" data-a="standort-oeffnen" data-v="${x.id}">Öffnen</button>` : ""}
-        <button class="knopf klein" data-a="standort-umbenennen" data-v="${x.id}">Umbenennen</button>
-        ${admin ? `<button class="knopf klein gefahr" data-a="standort-loeschen" data-v="${x.id}">Löschen</button>` : ""}
-      </div></div>`).join("") || `<div class="leer">Noch keine Standorte.</div>`}</div>
-    <div class="reihe"><input type="text" id="neuer-standort" placeholder="Neuer Standort, z. B. Werkstatt Nord"><button class="knopf haupt" data-a="standort-anlegen">Anlegen</button></div>
-    <p class="neben" style="margin:0">Jeder Standort hat sein eigenes Lager. Neue Standorte werden dir automatisch zugeordnet.</p>
-    ${admin ? `<div class="abschnitt-titel">Nutzer (Admin)</div><div class="glas">${S.nutzer.map((n) => `<div class="liste-zeile" style="cursor:default;flex-wrap:wrap">
-        <div style="flex:1;min-width:180px"><b>${esc(n.name || n.email)}</b> ${!n.freigegeben ? `<span class="pille alarm">wartet</span>` : n.rolle === "admin" ? `<span class="pille">Admin</span>` : ""}
+          ${offen ? "" : `<button class="knopf klein" data-a="standort-oeffnen" data-v="${x.id}">Öffnen</button>`}
+          <button class="knopf klein" data-a="standort-umbenennen" data-v="${x.id}">Umbenennen</button>
+          <button class="knopf klein gefahr" data-a="standort-entfernen" data-v="${x.id}">Löschen</button>
+        </div></div>`;
+    }).join("") || `<div class="leer">Noch keine Standorte.</div>`}</div>
+    <div class="abschnitt-titel">Neuer Standort</div>
+    <input type="text" id="neuer-standort" placeholder="Name, z. B. Werkstatt Nord" value="${esc(S.neuerName || "")}">
+    ${S.standorte.length ? `<label class="feld"><span>Lieferanten übernehmen von</span><select id="quelle" data-a="quelle-waehlen">
+      <option value="">Keine übernehmen</option>${S.standorte.map((x) => `<option value="${x.id}" ${x.id === quelle ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+      ${quelle ? (S.quellLieferanten.length ? `<div class="chips" id="quell-lieferanten">${S.quellLieferanten.map((l) =>
+        `<button type="button" class="chip" data-lid="${l.id}" aria-pressed="true">${esc(l.name)}</button>`).join("")}</div>` : `<span class="neben">Dort sind keine Lieferanten eingetragen.</span>`) : ""}` : ""}
+    <button class="knopf haupt" data-a="standort-anlegen">Standort anlegen</button>
+    <p class="neben" style="margin:0">Jeder Standort hat eigene Sorten, Fässer und Preise. Übernommene Lieferanten sind danach unabhängige Kopien.</p>
+    <div class="abschnitt-titel">Nutzer</div>
+    <p class="neben" style="margin:0 4px">Pro Standort: <b>lesen</b> = sieht das Lager, <b>ändern</b> = darf Sorten, Fässer, Preise bearbeiten.</p>
+    <div class="glas">${S.nutzer.map((n) => `<div class="liste-zeile" style="cursor:default;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px"><b>${esc(n.name || n.email)}</b> ${!n.freigegeben ? `<span class="pille alarm">wartet</span>` : n.rolle === "admin" ? `<span class="pille">Entwickler</span>` : ""}
           <div class="neben">${esc(n.email)}</div>
-          <div class="chips" style="margin-top:4px">${S.standorte.map((x) => `<button type="button" class="chip" data-a="nutzer-standort" data-v="${n.user_id}|${x.id}" aria-pressed="${n.standorte.has(x.id)}">${esc(x.name)}</button>`).join("")}</div></div>
-        ${n.user_id === S.sitzung.userId ? `<span class="neben">du</span>` : `
+          ${n.rolle === "admin" ? `<div class="neben">Alle Rechte an allen Standorten</div>` : `<div style="display:grid;gap:4px;margin-top:6px">${S.standorte.map((x) => {
+            const zu = n.standorte.has(x.id), ae = n.aendern.has(x.id);
+            return `<div class="reihe" style="gap:6px;flex-wrap:wrap"><span style="flex:1;min-width:100px">${esc(x.name)}</span>
+              <div class="seg" style="flex:0 0 auto">
+                <button type="button" aria-pressed="${!zu}" data-a="recht" data-v="${n.user_id}|${x.id}|kein">kein</button>
+                <button type="button" aria-pressed="${zu && !ae}" data-a="recht" data-v="${n.user_id}|${x.id}|lesen">lesen</button>
+                <button type="button" aria-pressed="${ae}" data-a="recht" data-v="${n.user_id}|${x.id}|aendern">ändern</button></div></div>`;
+          }).join("")}</div>`}</div>
+        ${n.user_id === S.sitzung.userId ? `<span class="neben">du</span>` : `<div class="reihe" style="gap:6px;flex-wrap:wrap">
           <button class="knopf klein ${n.freigegeben ? "" : "haupt"}" data-a="nutzer-frei" data-v="${n.user_id}">${n.freigegeben ? "Sperren" : "Freigeben"}</button>
-          <button class="knopf klein" data-a="nutzer-admin" data-v="${n.user_id}">${n.rolle === "admin" ? "Kein Admin" : "Admin"}</button>
-          <button class="knopf klein gefahr" data-a="nutzer-entfernen" data-v="${n.user_id}">Entfernen</button>`}
-      </div>`).join("")}</div>` : ""}
-    <div class="abschnitt-titel">Darstellung</div>
-    <div class="seg">${[["system", "Wie System"], ["light", "Hell"], ["dark", "Dunkel"]].map(([w, t]) => `<button aria-pressed="${theme === w}" data-a="thema-setzen" data-v="${w}">${t}</button>`).join("")}</div>`,
+          <button class="knopf klein" data-a="nutzer-admin" data-v="${n.user_id}">${n.rolle === "admin" ? "Kein Entwickler" : "Zum Entwickler machen"}</button>
+          <button class="knopf klein gefahr" data-a="nutzer-entfernen" data-v="${n.user_id}">Entfernen</button></div>`}
+      </div>`).join("")}</div>
+    ${darstellung}`,
     `<button class="knopf haupt" data-a="schliessen">Fertig</button>`);
 }
 async function verwalten(aktion, erfolg) {
@@ -822,11 +860,14 @@ function freigabeDialog(f) {
 
 // ---------- Ereignisse ----------
 document.addEventListener("click", async (e) => {
-  const chip = e.target.closest("#r-standorte .chip");
+  const chip = e.target.closest("#r-standorte .chip, #quell-lieferanten .chip");
   if (chip) { chip.setAttribute("aria-pressed", chip.getAttribute("aria-pressed") === "true" ? "false" : "true"); return; }
   const el = e.target.closest("[data-a]"); if (!el || el.matches('input[type="checkbox"]')) return;
   const a = el.dataset.a, v = el.dataset.v;
   const nr = Number(v);
+  if (S.ansicht === "app" && !darfAendern() && (/-(speichern|loeschen)$/.test(a) || ["sorte-neu", "fass-neu"].includes(a) || v === "neu")) {
+    toast("Nur Leserechte an diesem Standort"); return;
+  }
   switch (a) {
     case "tab": S.tab = v; S.suche = ""; zeichnen(); window.scrollTo(0, 0); break;
     case "kat": S.kat = v; S.offen = null; zeichnen(); break;
@@ -842,11 +883,18 @@ document.addEventListener("click", async (e) => {
     case "entwickler": S.entwicklerOffen = false; pinDialog(); break;
     case "pin-ok": pinPruefen(); break;
     case "standort-anlegen": {
-      const name = wert("neuer-standort"); if (!name) return;
+      const name = wert("neuer-standort"); if (!name) { toast("Bitte einen Namen eingeben"); return; }
+      const quelle = Number(S.quelle) || null;
+      const ids = new Set([...document.querySelectorAll('#quell-lieferanten .chip[aria-pressed="true"]')].map((b) => Number(b.dataset.lid)));
       await verwalten(async () => {
         const neu = await rest("POST", "/rest/v1/oellager_standort?select=id", { name }, { Prefer: "return=representation" });
-        await rest("POST", "/rest/v1/oellager_mitglied", { user_id: S.sitzung.userId, standort_id: neu[0].id }, { Prefer: "resolution=ignore-duplicates" });
-      }, `Standort „${name}“ angelegt`);
+        if (quelle && ids.size) {
+          const lief = S.quellLieferanten.filter((l) => ids.has(l.id));
+          await rest("POST", "/rest/v1/rpc/oellager_speichern", { p_standort: neu[0].id, p_geraet: "Web-App", p_version: null,
+            p_daten: { ...leererStand(), lieferanten: lief } });
+        }
+        S.neuerName = ""; S.quelle = ""; S.quellLieferanten = [];
+      }, `Standort „${name}“ angelegt` + (quelle && ids.size ? ` (${ids.size} Lieferanten übernommen)` : ""));
       break;
     }
     case "standort-umbenennen": {
@@ -854,7 +902,7 @@ document.addEventListener("click", async (e) => {
       if (name && name.trim()) await verwalten(() => rest("POST", "/rest/v1/rpc/oellager_standort_umbenennen", { p_id: nr, p_name: name.trim() }), "Umbenannt");
       break;
     }
-    case "standort-loeschen": {
+    case "standort-entfernen": {
       if (nr === S.standort && S.ansicht === "app") { toast("Der geöffnete Standort kann nicht gelöscht werden"); return; }
       const x = S.standorte.find((y) => y.id === nr);
       if (confirm(`„${x?.name}“ mit dem kompletten Lager für alle Nutzer löschen?`)) {
@@ -862,11 +910,10 @@ document.addEventListener("click", async (e) => {
       }
       break;
     }
-    case "nutzer-standort": {
-      const [uid, sid] = v.split("|"); const an = el.getAttribute("aria-pressed") !== "true";
-      await verwalten(() => an
-        ? rest("POST", "/rest/v1/oellager_mitglied", { user_id: uid, standort_id: Number(sid) }, { Prefer: "resolution=ignore-duplicates" })
-        : rest("DELETE", `/rest/v1/oellager_mitglied?user_id=eq.${uid}&standort_id=eq.${sid}`), "Gespeichert");
+    case "recht": {
+      const [uid, sid, stufe] = v.split("|");
+      await verwalten(() => rest("POST", "/rest/v1/rpc/oellager_recht_setzen",
+        { p_user: uid, p_standort: Number(sid), p_zugeordnet: stufe !== "kein", p_darf_aendern: stufe === "aendern" }), "Gespeichert");
       break;
     }
     case "nutzer-frei": case "nutzer-admin": {
@@ -940,12 +987,16 @@ document.addEventListener("click", async (e) => {
   }
 });
 document.addEventListener("change", async (e) => {
-  if (e.target.dataset.a !== "mein-standort") return;
-  const sid = Number(e.target.dataset.v), an = e.target.checked;
-  if (!an && sid === S.standort && S.ansicht === "app") { e.target.checked = true; toast("Erst zu einem anderen Standort wechseln"); return; }
-  await verwalten(() => an
-    ? rest("POST", "/rest/v1/oellager_mitglied", { user_id: S.sitzung.userId, standort_id: sid }, { Prefer: "resolution=ignore-duplicates" })
-    : rest("DELETE", `/rest/v1/oellager_mitglied?user_id=eq.${S.sitzung.userId}&standort_id=eq.${sid}`), an ? "Standort hinzugefügt" : "Standort abgewählt");
+  if (e.target.dataset.a !== "quelle-waehlen") return;
+  S.neuerName = wert("neuer-standort");
+  S.quelle = e.target.value; S.quellLieferanten = [];
+  if (S.quelle) {
+    try {
+      const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten&standort_id=eq.${S.quelle}`);
+      S.quellLieferanten = (rows[0]?.daten?.lieferanten || []).map((l) => ({ ...l }));
+    } catch (err) { toast(err.message); }
+  }
+  verwaltungDialog();
 });
 document.addEventListener("keydown", (e) => {
   if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
