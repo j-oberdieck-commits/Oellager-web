@@ -8,6 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <script src="zusammenfuehren.js"></script>
+<script src="fahrzeuge.js"></script>
 <title>Öllager</title>
 <style>
 /* Glaskacheln auf weichem Farbhintergrund – wie in der Android-App */
@@ -253,8 +254,13 @@ function sitzungAus(j) {
   return { access: j.access_token, refresh: j.refresh_token, ablauf: Date.now() + (j.expires_in || 3600) * 1000 - 60000,
            userId: j.user.id, email: j.user.email };
 }
+/** fetch mit klarer Meldung, wenn keine Verbindung besteht (für den Offline-Modus). */
+async function netz(url, opts) {
+  try { return await fetch(url, opts); }
+  catch (e) { const f = new Error("Keine Verbindung"); f.offline = true; throw f; }
+}
 async function auth(pfad, body) {
-  const r = await fetch(SB_URL + pfad, { method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const r = await netz(SB_URL + pfad, { method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const m = j.msg || j.error_description || j.message || `HTTP ${r.status}`;
@@ -268,6 +274,7 @@ async function token() {
   const s = S.sitzung;
   if (!s) throw new Error("Nicht angemeldet");
   if (s.access && Date.now() < s.ablauf) return s.access;
+  if (!navigator.onLine) { const f = new Error("Keine Verbindung"); f.offline = true; throw f; }
   const j = await auth("/auth/v1/token?grant_type=refresh_token", { refresh_token: s.refresh });
   sitzungSpeichern(sitzungAus(j));
   return S.sitzung.access;
@@ -275,7 +282,7 @@ async function token() {
 async function rest(methode, pfad, body, extra = {}) {
   const h = { apikey: SB_KEY, "Content-Type": "application/json", Accept: "application/json", ...extra };
   if (S.sitzung) h.Authorization = "Bearer " + (await token());
-  const r = await fetch(SB_URL + pfad, { method: methode, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await netz(SB_URL + pfad, { method: methode, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await r.text();
   if (!r.ok) {
     const m = (() => { try { return JSON.parse(text).message; } catch (e) { return text; } })() || `HTTP ${r.status}`;
@@ -293,6 +300,14 @@ async function standorteLaden() {
   try { S.standorte = await rest("GET", "/rest/v1/oellager_standort?select=id,name&order=name"); } catch (e) { /* offline */ }
 }
 async function verwaltungLaden() {
+  try { await verwaltungLadenOnline(); cacheSchreiben("oel_cache_meta", { ich: S.ich, standorte: S.standorte, meine: [...S.meine], aenderbar: [...S.aenderbar] }); }
+  catch (e) {
+    const c = e.offline && cacheLesen("oel_cache_meta");
+    if (!c || c.ich?.user_id !== S.sitzung?.userId) throw e;
+    S.ich = c.ich; S.standorte = c.standorte; S.meine = new Set(c.meine); S.aenderbar = new Set(c.aenderbar); S.offline = true;
+  }
+}
+async function verwaltungLadenOnline() {
   const uid = S.sitzung.userId;
   const ich = await rest("GET", `/rest/v1/oellager_nutzer?select=user_id,email,name,rolle,freigegeben&user_id=eq.${uid}`);
   S.ich = ich[0] || null;
@@ -322,18 +337,31 @@ async function nachAnmeldung(gewuenscht) {
   S.ansicht = "standortwahl";
 }
 async function standortOeffnen(id) {
-  if (S.ungespeichert) await speichern();
+  if (S.ungespeichert && !S.offline) await speichern();
   S.standort = id; localStorage.setItem("oel_standort", String(id));
   S.ansicht = "app"; S.daten = null; zeichnen();
   await laden();
 }
 const standortName = () => S.standorte.find((x) => x.id === S.standort)?.name || "";
-const darfAendern = () => S.ich?.rolle === "admin" || S.aenderbar.has(S.standort);
+const darfAendern = () => !S.offline && (S.ich?.rolle === "admin" || S.aenderbar.has(S.standort));
 const istEntwickler = () => S.ich?.rolle === "admin" && S.ich?.freigegeben;
 const wartendeAnzahl = () => (istEntwickler() ? S.nutzer.filter((n) => !n.freigegeben).length : 0);
 
+function cacheLesen(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
+function cacheSchreiben(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* Speicher voll */ } }
+
 async function laden() {
-  const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version,geaendert,geraet,geaendert_von&standort_id=eq.${S.standort}`);
+  let rows;
+  try {
+    rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version,geaendert,geraet,geaendert_von&standort_id=eq.${S.standort}`);
+    S.offline = false;
+  } catch (e) {
+    const c = e.offline && cacheLesen("oel_cache_" + S.standort);
+    if (!c) throw e;
+    // Offline: zuletzt geladenen Stand nur lesend anzeigen
+    S.offline = c.zeit; rows = c.rows;
+  }
+  if (!S.offline) cacheSchreiben("oel_cache_" + S.standort, { zeit: new Date().toISOString(), rows });
   if (rows.length === 0) { S.daten = leererStand(); S.version = null; S.geaendert = ""; S.geraet = ""; }
   else {
     const d = rows[0].daten;
@@ -443,7 +471,9 @@ function zeichnen() {
     html += `<div class="seg" style="margin-top:12px">${Object.entries(KATEGORIEN)
       .map(([k, v]) => `<button aria-pressed="${S.kat === k}" data-a="kat" data-v="${k}">${v.titel}</button>`).join("")}</div>`;
   }
-  if (!darfAendern()) html += `<div class="banner">🔒 Nur Leserechte an diesem Standort</div>`;
+  if (typeof S.offline === "string") html += `<div class="banner">📴 Offline – Stand vom ${new Date(S.offline).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, nur lesen. <button class="knopf klein" data-a="neu-laden">Erneut verbinden</button></div>`;
+  else if (S.offline) html += `<div class="banner">📴 Offline – nur lesen</div>`;
+  else if (!darfAendern()) html += `<div class="banner">🔒 Nur Leserechte an diesem Standort</div>`;
   html += ({ lager: lagerHtml, sorten: sortenHtml, preise: preiseHtml, auswertung: auswertungHtml, stamm: stammHtml })[S.tab]();
   app.innerHTML = html;
 }
@@ -623,6 +653,77 @@ function vergleichDialog(rows) {
       return `<div style="margin:8px 0"><b>${esc(l[0].sorte + " " + l[0].visko)}</b>${zeilen(p)}${p.length > 1 && p.at(-1)[1] - p[0][1] > 0.005 ? `<div class="neben" style="font-size:12px">${esc(name(p[0][0]))} kauft ${fmtP(p.at(-1)[1] - p[0][1])}/L günstiger ein als ${esc(name(p.at(-1)[0]))}</div>` : ""}</div>`; }).join("") || `<div class="neben">Keine Sorte ist an mehr als einem Standort eingelagert.</div>`}</div>`,
     `<button class="knopf" data-a="zurueck-entwickler">Zurück</button><button class="knopf haupt" data-a="schliessen">Fertig</button>`);
 }
+function fahrzeugDialog() {
+  const f = S.fz || (S.fz = { marke: null, idx: null });
+  const liste = Fahrzeuge.liste.map((v, i) => ({ ...v, i })).filter((v) => v.kategorie === S.kat);
+  const marken = [...new Set(liste.map((v) => v.hersteller))];
+  const v = f.idx != null ? Fahrzeuge.liste[f.idx] : null;
+  let treffer = "";
+  if (v && v.kategorie === S.kat) {
+    const t = sortenDer(S.kat).filter((so) => so.aktiv !== false).filter((so) => Fahrzeuge.passt(v,
+      (so.freigabeIds || []).map(freigabe).filter(Boolean).flatMap((x) => [x.bezeichnung, x.hersteller + " " + x.bezeichnung]), so.spezifikation))
+      .map((so) => ({ so, lp: schnitt(faesserVon(so.id)) })).sort((a, b) => (a.lp ?? 1e9) - (b.lp ?? 1e9));
+    treffer = `<div class="abschnitt-titel">${t.length ? `Passende Sorten (${t.length})` : "Keine passende Sorte im Lager"}</div><div class="glas">${t.map(({ so, lp }, i) =>
+      `<div class="liste-zeile" data-a="fahrzeug-sorte" data-v="${so.id}">${badge(so.marke || so.name)}<div style="flex:1"><b>${esc(anzeigename(so))}</b>
+        <div class="neben">${esc([so.viskositaet, lieferant(so.lieferantId)?.name, faesserVon(so.id).length + " Fässer"].filter(Boolean).join(" · "))}</div></div>
+        <div class="preis ${i === 0 && lp != null ? "gut" : ""}">${lp != null ? fmtP(lp) + "/L" : "–"}</div></div>`).join("") ||
+      `<div class="leer">Keine Sorte hat ${esc(v.normen.map((n) => n[0]).join(" + "))}. Prüfe die Freigaben deiner Sorten.</div>`}</div>`;
+  }
+  dialog("Welches Öl passt?", `<p class="neben" style="margin:0">Ohne Gewähr – maßgeblich ist die Betriebsanleitung. Geprüft werden Freigaben und Spezifikation deiner ${esc(KATEGORIEN[S.kat].titel)}-Sorten.</p>
+    <div class="feld"><span class="neben">Marke</span><div class="chips">${marken.map((m) => `<button type="button" class="chip" data-a="fz-marke" data-v="${esc(m)}" aria-pressed="${f.marke === m}">${esc(m)}</button>`).join("")}</div></div>
+    ${f.marke ? `<div class="feld"><span class="neben">Motor / Baujahr</span><div style="display:grid;gap:6px">${liste.filter((x) => x.hersteller === f.marke).map((x) =>
+      `<button type="button" class="chip" style="text-align:left;border-radius:12px;padding:8px 12px" data-a="fz-motor" data-v="${x.i}" aria-pressed="${f.idx === x.i}">${esc(x.titel)}
+        <div style="font-size:12px;opacity:.75">${esc(x.normen.map((n) => n[0]).join(" + "))}${x.viskositaet ? " · meist " + esc(x.viskositaet) : ""}</div></button>`).join("")}</div></div>` : ""}
+    ${treffer}`, `<button class="knopf haupt" data-a="schliessen">Fertig</button>`);
+}
+
+// ---------- Export: Excel (CSV) und Drucken/PDF ----------
+const zahlDe = (v) => (v == null ? "" : Number(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+function csvLaden(name, zeilen) {
+  const feld = (t) => { t = String(t ?? ""); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const text = "\uFEFF" + zeilen.map((z) => z.map(feld).join(";")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+const dateiName = (art, endung) => `Oellager_${art}_${(standortName() || "Lager").replace(/[^A-Za-z0-9ÄÖÜäöüß-]+/g, "_")}_${new Date().toISOString().slice(0, 10)}.${endung}`;
+function bestandZeilen() {
+  return S.daten.faesser.filter((f) => !f.leerAm).map((f) => ({ f, so: S.daten.sorten.find((x) => x.id === f.sorteId) })).filter((x) => x.so)
+    .sort((a, b) => (a.so.kategorie || "OEL").localeCompare(b.so.kategorie || "OEL") || viskoKey(a.so.viskositaet).localeCompare(viskoKey(b.so.viskositaet)) || anzeigename(a.so).localeCompare(anzeigename(b.so), "de"));
+}
+function bestandCsv() {
+  const z = bestandZeilen();
+  csvLaden(dateiName("Bestand", "csv"), [["Kategorie", "Viskosität / Typ", "Marke", "Produkt", "Spezifikation", "Lieferant", "Lagerplatz", "Gebinde (L)", "Preis Fass netto (€)", "Literpreis netto (€)", "Lieferdatum"],
+    ...z.map(({ f, so }) => [KATEGORIEN[so.kategorie || "OEL"].titel, so.viskositaet, so.marke, so.name, so.spezifikation, lieferant(so.lieferantId)?.name || "", f.lagerplatz, zahlDe(f.gebindeL), zahlDe(f.preisFass), zahlDe(literpreis(f)), f.lieferdatum]),
+    ["Summe", "", "", "", "", "", z.length + " Fässer", "", zahlDe(z.reduce((s, x) => s + x.f.preisFass, 0)), "", ""]]);
+}
+function preiseCsv() {
+  const sorten = S.daten.sorten.filter((x) => x.aktiv !== false).sort((a, b) => viskoKey(a.viskositaet).localeCompare(viskoKey(b.viskositaet)) || anzeigename(a).localeCompare(anzeigename(b), "de"));
+  csvLaden(dateiName("Preise", "csv"), [["Kategorie", "Viskosität / Typ", "Sorte", "Ø Einkauf netto €/L", ...QUELLEN.map((q) => q.name + " netto €/L"), "Bester Preis"],
+    ...sorten.map((so) => {
+      const eigen = schnitt(faesserVon(so.id));
+      const preise = QUELLEN.map((q) => { const a = S.daten.angebote.find((x) => x.sorteId === so.id && x.quelle === q.code); return a ? angebotLp(a) : null; });
+      const best = [...preise.map((p, i) => [QUELLEN[i].name, p]), ["Eigener Einkauf", eigen]].filter((x) => x[1] != null).sort((a, b) => a[1] - b[1])[0];
+      return [KATEGORIEN[so.kategorie || "OEL"].titel, so.viskositaet, anzeigename(so), zahlDe(eigen), ...preise.map(zahlDe), best ? best[0] : ""];
+    })]);
+}
+function bestandDrucken() {
+  const z = bestandZeilen();
+  const w = window.open("", "_blank");
+  if (!w) { toast("Bitte Pop-ups für diese Seite erlauben"); return; }
+  w.document.write(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>${esc(dateiName("Bestand", "pdf"))}</title>
+    <style>body{font:11px system-ui,Arial,sans-serif;margin:24px}h1{font-size:18px;margin:0}p{color:#666;margin:2px 0 14px}table{border-collapse:collapse;width:100%}
+    th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}th{font-size:10px;text-transform:uppercase;color:#444}td.r,th.r{text-align:right}tfoot td{font-weight:700;border-top:2px solid #333}</style></head><body>
+    <h1>Bestandsliste ${standortName() ? "Lager " + esc(standortName()) : ""}</h1><p>Stand ${new Date().toLocaleDateString("de-DE")} · Preise netto</p>
+    <table><thead><tr><th>Visk./Typ</th><th>Sorte</th><th>Lieferant</th><th>Lagerplatz</th><th class="r">Gebinde</th><th class="r">Preis Fass</th><th class="r">€/L</th></tr></thead><tbody>
+    ${z.map(({ f, so }) => `<tr><td>${esc(so.viskositaet)}</td><td>${esc(anzeigename(so))}</td><td>${esc(lieferant(so.lieferantId)?.name || "")}</td><td>${esc(f.lagerplatz)}</td>
+      <td class="r">${fmtZahl(f.gebindeL)} L</td><td class="r">${fmtEur(f.preisFass)}</td><td class="r">${fmtEur(literpreis(f))}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td colspan="5">${z.length} Fässer</td><td class="r">${fmtEur(z.reduce((s, x) => s + x.f.preisFass, 0))}</td><td></td></tr></tfoot></table>
+    <script>setTimeout(() => print(), 300)<\/script></body></html>`);
+  w.document.close();
+}
+
 async function verwalten(aktion, erfolg) {
   try {
     await aktion();
@@ -651,7 +752,8 @@ function lagerHtml() {
   const sorten = sortenDer(S.kat).filter((s) => s.aktiv !== false);
   let html = summenHtml(sorten, alle);
   html += `<div class="reihe" style="margin-top:12px"><input type="search" placeholder="Suchen: Marke, Sorte, Freigabe, Lagerplatz" data-a="suche" value="${esc(S.suche)}">
-    <button class="knopf haupt" data-a="sorte-neu">+ Sorte</button></div>`;
+    <button class="knopf haupt" data-a="sorte-neu">+ Sorte</button></div>
+    <button class="knopf" data-a="fahrzeug" style="width:100%;margin-top:10px">🚗 Welches Öl passt? – nach Fahrzeug</button>`;
   const q = S.suche.trim().toLowerCase();
   const passt = (s) => !q || [s.name, s.marke, s.viskositaet, s.spezifikation, lieferant(s.lieferantId)?.name,
     ...(s.freigabeIds || []).map((i) => freigabe(i)?.bezeichnung), ...faesserVon(s.id).map((f) => f.lagerplatz)]
@@ -823,7 +925,10 @@ function auswertungBestandHtml() {
     }).join("")}</div>` : ""}`;
 }
 function auswertungHtml() {
-  return auswertungBestandHtml() + `<div class="reihe" style="margin-top:18px"><b style="flex:1;font-size:17px">Änderungsprotokoll</b>
+  return `<div class="reihe" style="margin-top:12px;flex-wrap:wrap;gap:8px">
+      <button class="knopf klein" data-a="export-bestand">Bestand als Excel</button>
+      <button class="knopf klein" data-a="export-preise">Preise als Excel</button>
+      <button class="knopf klein" data-a="export-druck">Bestand drucken / PDF</button></div>` + auswertungBestandHtml() + `<div class="reihe" style="margin-top:18px"><b style="flex:1;font-size:17px">Änderungsprotokoll</b>
     <button class="knopf klein" data-a="protokoll-neu">Aktualisieren</button></div>${protokollHtml()}`;
 }
 
@@ -1055,6 +1160,13 @@ document.addEventListener("click", async (e) => {
       }
       break;
     }
+    case "fahrzeug": fahrzeugDialog(); break;
+    case "fz-marke": S.fz = { marke: v, idx: null }; fahrzeugDialog(); break;
+    case "fz-motor": S.fz.idx = nr; fahrzeugDialog(); break;
+    case "fahrzeug-sorte": dlg.close(); sorteDialog(S.daten.sorten.find((x) => x.id === nr)); break;
+    case "export-bestand": bestandCsv(); break;
+    case "export-preise": preiseCsv(); break;
+    case "export-druck": bestandDrucken(); break;
     case "vergleich": {
       try {
         const rows = await rest("GET", "/rest/v1/oellager_bestand?select=standort_id,daten");
@@ -1092,7 +1204,7 @@ document.addEventListener("click", async (e) => {
       const dunkel = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
       r.dataset.theme = dunkel ? "light" : "dark"; localStorage.setItem("oel_thema", r.dataset.theme); break;
     }
-    case "neu-laden": try { await laden(); zeichnen(); toast("Aktueller Stand geladen"); } catch (err) { toast(err.message); } break;
+    case "neu-laden": try { if (S.offline) await verwaltungLaden(); await laden(); zeichnen(); toast(S.offline ? "Weiterhin offline" : "Aktueller Stand geladen"); } catch (err) { toast(err.message); } break;
     case "abmelden":
       if (confirm("Abmelden?")) {
         if (S.ungespeichert) await speichern();
@@ -1229,6 +1341,9 @@ document.addEventListener("visibilitychange", async () => {
     try { await laden(); zeichnen(); } catch (e) { /* offline */ }
   }
 });
+window.addEventListener("online", async () => {
+  if (S.offline && S.ansicht === "app") { try { await verwaltungLaden(); await laden(); zeichnen(); toast("Wieder online"); } catch (e) { /* noch nicht */ } }
+});
 window.addEventListener("beforeunload", (e) => { if (S.ungespeichert) { e.preventDefault(); e.returnValue = ""; } });
 
 // ---------- Start ----------
@@ -1261,7 +1376,10 @@ window.addEventListener("beforeunload", (e) => { if (S.ungespeichert) { e.preven
       await verwaltungLaden();
       S.ansicht = S.ich?.freigegeben ? "standortwahl" : "warten";
     }
-    catch (err) { sitzungSpeichern(null); S.ansicht = "anmelden"; S.meldung = /abgelaufen|refresh|JWT|token/i.test(err.message) ? "Bitte erneut anmelden" : err.message; }
+    catch (err) {
+      if (err.offline) { S.ansicht = "anmelden"; S.meldung = "Keine Verbindung und kein gespeicherter Stand vorhanden."; }
+      else { sitzungSpeichern(null); S.ansicht = "anmelden"; S.meldung = /abgelaufen|refresh|JWT|token/i.test(err.message) ? "Bitte erneut anmelden" : err.message; }
+    }
   }
   zeichnen();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
