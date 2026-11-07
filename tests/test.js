@@ -24,13 +24,21 @@ async function handler(route) {
   if (p === "/auth/v1/token") {
     if (body.password !== "geheim1") return json(route, { msg: "Invalid login credentials" }, 400);
     const u = db.nutzer.find((n) => n.email === body.email) || anna;
-    return json(route, { access_token: "t", refresh_token: "r", expires_in: 3600, user: { id: u.user_id, email: u.email } });
+    db.loginZaehler = (db.loginZaehler || 0) + 1;
+    return json(route, { access_token: "t", refresh_token: "r", expires_in: 3600, user: { id: u.user_id, email: u.email,
+      factors: u.mfa ? [{ id: "f1", factor_type: "totp", status: "verified" }] : [] } });
   }
   if (p === "/storage/v1/object/list/datenblaetter") return json(route, (db.blaetter || []).map((n, i) => ({ id: String(i + 1), name: n })));
   if (p.startsWith("/storage/v1/object/datenblaetter/") && m === "POST") { (db.blaetter = db.blaetter || []).push(decodeURIComponent(p.split("/").pop())); db.blattTyp = req.headers()["content-type"]; return json(route, { Key: p }); }
   if (p === "/rest/v1/oellager_sicherung") return json(route, db.sicherungen || (db.sicherungen = [{ id: 7, standort_id: 1, erstellt: new Date().toISOString(), art: "automatisch", version: 3 }]));
   if (p === "/rest/v1/rpc/oellager_jetzt_sichern") { db.sicherungen.unshift({ id: 8, standort_id: 1, erstellt: new Date().toISOString(), art: "manuell", version: 4 }); return json(route, 2); }
   if (p === "/rest/v1/rpc/oellager_wiederherstellen") { db.wiederhergestellt = body.p_sicherung; return json(route, 9); }
+  if (p === "/auth/v1/factors/f1/challenge") return json(route, { id: "c1" });
+  if (p === "/auth/v1/factors/f1/verify") {
+    if (body.code !== "123456") return json(route, { msg: "Invalid TOTP code entered" }, 422);
+    return json(route, { access_token: "t-aal2", refresh_token: "r2", expires_in: 3600, user: { id: "u-mfa", email: "mfa@test.de" } });
+  }
+  if (p === "/rest/v1/oellager_fehler" && m === "POST") { (db.fehler = db.fehler || []).push(body); return route.fulfill({ status: 201, body: "" }); }
   if (p === "/auth/v1/recover") { db.recover = { email: body.email, ziel: q.redirect_to }; return json(route, {}); }
   if (p === "/auth/v1/user" && m === "PUT") { db.neuesPw = body.password; return json(route, { id: "u-anna" }); }
   if (p === "/rest/v1/oellager_protokoll") return json(route, [{ zeit: new Date().toISOString(), wer: "ben@test.de", geraet: "Web-App", bereich: "faesser", aktion: "leer gemeldet", text: "Castrol Edge 5W-30 · A1 · 208 L" }]);
@@ -85,14 +93,24 @@ async function handler(route) {
   return json(route, { message: "unbekannt " + m + " " + p }, 404);
 }
 const SCHIRM = path.join(__dirname, "bilder/"); fs.mkdirSync(SCHIRM, { recursive: true });
+async function kopf(page, a) {
+  if (!(await page.isVisible(`#kopf [data-a="${a}"]`))) await page.click('#kopf [data-a="menue"]');
+  await page.click(`#kopf [data-a="${a}"]`);
+}
+async function entwickler(page) {
+  await kopf(page, "entwickler");
+  if (await page.isVisible("#pin")) { await page.fill("#pin", "geheim1"); await page.click('[data-a="pin-ok"]'); }
+  await page.waitForSelector("#dialog >> text=Neuer Standort");
+}
 const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process.exitCode = 1; };
 
 (async () => {
-  const browser = await chromium.launch({ args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ args: ["--no-sandbox"], ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}) });
   const ctx = await browser.newContext({ viewport: { width: 412, height: 900 }, serviceWorkers: "block" });
   await ctx.route("https://mykobsukqlrownycektl.supabase.co/**", handler);
   const page = await ctx.newPage();
   const fehler = []; page.on("pageerror", (e) => fehler.push(e.message));
+  page.on("console", (m) => { if (/Content Security Policy|Refused to/i.test(m.text())) fehler.push("CSP: " + m.text()); });
   page.on("dialog", (d) => d.accept(d.type() === "prompt" ? "Werkstatt Nord-Ost" : undefined));
   await page.goto("http://localhost:8765/");
   await page.waitForSelector("#login-form");
@@ -129,9 +147,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.screenshot({ path: SCHIRM + "2-lager.png" });
 
   // Entwicklermenü: PIN, Standort anlegen, umbenennen
-  await page.click('[data-a="entwickler"]');
-  await page.fill("#pin", "1104");
-  await page.waitForSelector("text=Neuer Standort");
+  await entwickler(page);
   db.bestand[1].daten.lieferanten = [{ id: 1, name: "WM SE" }, { id: 2, name: "PVK" }]; db.bestand[1].version++;
   await page.fill("#neuer-standort", "Lager West");
   await page.selectOption("#quelle", "1");
@@ -162,19 +178,19 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.screenshot({ path: SCHIRM + "6-auswertung.png", fullPage: true });
   await page.click('[data-a="tab"][data-v="lager"]');
   // Standortvergleich (Entwickler)
-  await page.click('[data-a="entwickler"]'); await page.fill("#pin", "1104");
+  await entwickler(page);
   await page.click('[data-a="vergleich"]');
   await page.waitForSelector("text=Bestand je Standort");
   ok("Standortvergleich öffnet", (await page.textContent("#dialog")).includes("Alle Standorte"));
   await page.click('#dialog [data-a="schliessen"]');
   // Standort wechseln → Süd ist leer, eigener Bestand
-  await page.click('[data-a="standort-wechseln"]');
+  await kopf(page, "standort-wechseln");
   await page.click('#app [data-a="standort-oeffnen"][data-v="2"]');
   await page.waitForSelector("text=Noch keine Motoröl-Sorten");
   ok("Süd hat eigenes (leeres) Lager", (await page.textContent("#kopf")).includes("Werkstatt Süd"));
 
   // Abmelden → Registrierung eines neuen Nutzers
-  await page.click('[data-a="abmelden"]');
+  await kopf(page, "abmelden");
   await page.click('[data-a="zu-registrieren"]');
   await page.fill("#r-name", "Ben"); await page.fill("#r-email", "ben@test.de"); await page.fill("#r-pw", "geheim1"); await page.fill("#r-pw2", "geheim1");
   await page.click('#r-standorte .chip[data-sid="1"]'); await page.click('#r-standorte .chip[data-sid="2"]');
@@ -200,7 +216,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.click('[data-a="schliessen"]');
   // Entwickler gibt Ben Ändern-Recht für Nord
   db.mitglied.find((x) => x.user_id === "u-ben@test.de" && x.standort_id === 1).darf_aendern = true;
-  await page.click('[data-a="standort-wechseln"]'); await page.click('#app [data-a="standort-oeffnen"][data-v="1"]');
+  await kopf(page, "standort-wechseln"); await page.click('#app [data-a="standort-oeffnen"][data-v="1"]');
   await page.waitForSelector('[data-a="sorte-neu"]');
   ok("Ben mit Ändern-Recht: + Sorte da, kein Hinweis", !(await page.textContent("#app")).includes("Nur Leserechte"));
   ok("Ben hat als Leser nichts gespeichert", db.rpc.length === rpcVorher);
@@ -210,7 +226,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.waitForSelector("text=Standort wählen");
   ok("Nach Neuladen wieder Standortwahl", true);
   // Passwort vergessen
-  await page.click('[data-a="abmelden"]');
+  await kopf(page, "abmelden");
   await page.click('[data-a="zu-vergessen"]');
   await page.fill("#v-email", "anna@test.de"); await page.click("#vergessen-form button[type=submit]");
   await page.waitForSelector("text=E-Mail verschickt");
@@ -232,7 +248,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.screenshot({ path: SCHIRM + "5-protokoll.png" });
   // Fahrzeugsuche
   db.bestand[1].daten.sorten[0].spezifikation = "ACEA C3, VW 504 00 / 507 00"; db.bestand[1].version++;
-  await page.click('[data-a="neu-laden"]'); await page.waitForTimeout(500);
+  await kopf(page, "neu-laden"); await page.waitForTimeout(500);
   await page.click('[data-a="tab"][data-v="lager"]');
   await page.click('[data-a="fahrzeug"]');
   await page.click('[data-a="fz-marke"][data-v="VW · Audi · Seat · Škoda"]');
@@ -287,7 +303,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.screenshot({ path: SCHIRM + "9-sorte.png", fullPage: true });
   await page.click('#dialog [data-a="schliessen"]');
   // Sicherungen
-  await page.click('[data-a="entwickler"]'); await page.fill("#pin", "1104");
+  await entwickler(page);
   await page.click('[data-a="sicherungen"]');
   await page.waitForSelector("text=Jetzt sichern");
   await page.click('[data-a="jetzt-sichern"]');
@@ -301,6 +317,21 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.waitForSelector(".geteilt .detail");
   ok("Breiter Bildschirm: Liste links, Details rechts", await page.isVisible(".geteilt .detail .sorte"));
   await page.screenshot({ path: SCHIRM + "10-tablet.png" });
+  // Zwei-Faktor-Anmeldung
+  await page.setViewportSize({ width: 412, height: 900 });
+  db.nutzer.push({ user_id: "u-mfa", email: "mfa@test.de", name: "Mia", rolle: "nutzer", freigegeben: true, mfa: true });
+  db.mitglied.push({ user_id: "u-mfa", standort_id: 1, darf_aendern: false });
+  await kopf(page, "abmelden");
+  await page.fill("#l-email", "mfa@test.de"); await page.fill("#l-pw", "geheim1"); await page.selectOption("#l-standort", "1");
+  await page.click("#login-form button[type=submit]");
+  await page.waitForSelector("#code-form");
+  ok("Zwei-Faktor: Code wird abgefragt", true);
+  await page.fill("#c-code", "000000"); await page.click("#code-form button[type=submit]");
+  await page.waitForSelector("text=Code falsch oder abgelaufen");
+  await page.fill("#c-code", "123456"); await page.click("#code-form button[type=submit]");
+  await page.waitForSelector('[data-a="tab"][data-v="lager"]');
+  ok("Zwei-Faktor: falscher Code abgelehnt, richtiger öffnet den Standort", JSON.parse(await page.evaluate(() => localStorage.getItem("oel_sitzung"))).access === "t-aal2");
+  ok("Kein Entwicklermenü für normale Nutzer", !(await page.evaluate(() => { document.querySelector('#kopf [data-a="menue"]').click(); return !!document.querySelector('#kopf [data-a="entwickler"]'); })));
   ok("Keine JS-Fehler", fehler.length === 0 || (console.log(fehler), false));
   await browser.close(); srv.close();
   if (process.exitCode) console.log("\nMindestens ein Test ist fehlgeschlagen.");
