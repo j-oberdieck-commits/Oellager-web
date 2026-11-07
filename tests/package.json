@@ -1,0 +1,7 @@
+{
+  "name": "oellager-web-tests",
+  "private": true,
+  "description": "Browser-Tests der Öllager Web-App",
+  "scripts": { "test": "node test.js" },
+  "dependencies": { "playwright": "1.48.2" }
+}

@@ -1,0 +1,23 @@
+name: Supabase wach halten
+
+# Kostenlose Supabase-Projekte pausieren nach ca. 7 Tagen ohne Zugriff.
+# Eine kleine tägliche Abfrage (nur die öffentliche Standortliste) verhindert das.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  anfragen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Supabase abfragen
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://mykobsukqlrownycektl.supabase.co/rest/v1/oellager_standort?select=id&limit=1" \
+            -H "apikey: sb_publishable_gS2RdAZbARY-zn-e0A4fag_NoxLOTgb")
+          echo "Antwort: $code"
+          test "$code" = "200"
