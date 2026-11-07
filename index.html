@@ -124,7 +124,9 @@ label.feld > span { padding-left: 2px; }
 .abschnitt-titel { font-size: 14px; font-weight: 700; color: var(--primary); margin: 18px 4px 6px; }
 nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); background: color-mix(in srgb, var(--hinter-b) 70%, transparent); border-top: 1px solid var(--linie); }
-nav.tabs .seg { max-width: 600px; margin: 0 auto; }
+nav.tabs .seg { max-width: 640px; margin: 0 auto; }
+nav.tabs .seg button { padding: 8px 4px; font-size: 13px; }
+.zaehler { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--teuer); color: #fff; font-size: 11px; font-weight: 700; vertical-align: top; }
 .leer { text-align: center; padding: 28px 16px; color: var(--neben); }
 .status { font-size: 12px; color: var(--neben); }
 .status.fehler { color: var(--teuer); }
@@ -328,6 +330,7 @@ async function standortOeffnen(id) {
 const standortName = () => S.standorte.find((x) => x.id === S.standort)?.name || "";
 const darfAendern = () => S.ich?.rolle === "admin" || S.aenderbar.has(S.standort);
 const istEntwickler = () => S.ich?.rolle === "admin" && S.ich?.freigegeben;
+const wartendeAnzahl = () => (istEntwickler() ? S.nutzer.filter((n) => !n.freigegeben).length : 0);
 
 async function laden() {
   const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version,geaendert,geraet,geaendert_von&standort_id=eq.${S.standort}`);
@@ -359,7 +362,7 @@ async function speichern() {
       const v = await rest("POST", "/rest/v1/rpc/oellager_speichern",
         { p_standort: S.standort, p_daten: stand, p_geraet: "Web-App", p_version: S.version });
       if (v != null) {
-        S.version = v; S.basis = stand; S.geraet = "Web-App"; S.fehler = "";
+        S.version = v; S.basis = stand; S.geraet = "Web-App"; S.fehler = ""; S.protokollFuer = null;
         // Während des Speicherns weiter getippt? Dann gleich nochmal
         S.ungespeichert = !Zusammenfuehren.gleich(stand, S.daten);
         if (S.ungespeichert) { clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 700); }
@@ -412,7 +415,7 @@ function kopfZeichnen() {
     <h1>${S.ansicht === "app" && standortName() ? "Lager " + esc(standortName()) : "Öllager"}<span class="unter status ${S.fehler ? "fehler" : ""}">${esc(st)}</span></h1>
     ${S.sitzung && S.ansicht === "app" ? `
       <button class="icon" data-a="standort-wechseln" title="Standort wechseln" aria-label="Standort wechseln">⌖</button>
-      <button class="icon" data-a="entwickler" title="Entwicklermenü" aria-label="Entwicklermenü">⚙</button>
+      <button class="icon" data-a="entwickler" title="Entwicklermenü" aria-label="Entwicklermenü">⚙${wartendeAnzahl() ? `<span class="zaehler">${wartendeAnzahl()}</span>` : ""}</button>
       <button class="icon" data-a="brutto" title="Netto/Brutto umschalten" aria-label="Netto/Brutto umschalten">${S.brutto ? "Brutto" : "Netto"}</button>
       <button class="icon" data-a="thema" title="Hell/Dunkel" aria-label="Hell oder dunkel">◐</button>
       <button class="icon" data-a="neu-laden" title="Neu laden" aria-label="Neu laden">⟳</button>
@@ -425,13 +428,14 @@ function zeichnen() {
   const app = $("#app");
   if (S.ansicht !== "app") {
     $("#tabs").hidden = true;
-    app.innerHTML = ({ anmelden: loginHtml, registrieren: registrierHtml, warten: warteHtml, standortwahl: standortWahlHtml })[S.ansicht]();
+    app.innerHTML = ({ anmelden: loginHtml, registrieren: registrierHtml, warten: warteHtml, standortwahl: standortWahlHtml,
+      vergessen: vergessenHtml, "neues-passwort": neuesPasswortHtml })[S.ansicht]();
     return;
   }
   if (!S.daten) { app.innerHTML = `<div class="leer">Wird geladen …</div>`; return; }
   $("#tabs").hidden = false;
   document.body.classList.toggle("nur-lesen", !darfAendern());
-  $("#tabs").innerHTML = `<div class="seg" role="tablist">${[["lager", "Lager"], ["sorten", "Sorten"], ["preise", "Preise"], ["stamm", "Stammdaten"]]
+  $("#tabs").innerHTML = `<div class="seg" role="tablist">${[["lager", "Lager"], ["sorten", "Sorten"], ["preise", "Preise"], ["auswertung", "Auswertung"], ["stamm", "Stammdaten"]]
     .map(([t, n]) => `<button role="tab" aria-pressed="${S.tab === t}" data-a="tab" data-v="${t}">${n}</button>`).join("")}</div>`;
 
   let html = "";
@@ -440,7 +444,7 @@ function zeichnen() {
       .map(([k, v]) => `<button aria-pressed="${S.kat === k}" data-a="kat" data-v="${k}">${v.titel}</button>`).join("")}</div>`;
   }
   if (!darfAendern()) html += `<div class="banner">🔒 Nur Leserechte an diesem Standort</div>`;
-  html += ({ lager: lagerHtml, sorten: sortenHtml, preise: preiseHtml, stamm: stammHtml })[S.tab]();
+  html += ({ lager: lagerHtml, sorten: sortenHtml, preise: preiseHtml, auswertung: auswertungHtml, stamm: stammHtml })[S.tab]();
   app.innerHTML = html;
 }
 
@@ -463,6 +467,29 @@ function loginHtml() {
     ${meldungHtml()}${warten()}
     <button class="knopf haupt" type="submit" ${S.laeuft ? "disabled" : ""}>Anmelden</button>
     <button class="knopf" type="button" data-a="zu-registrieren">Neu registrieren</button>
+    <button class="knopf" type="button" data-a="zu-vergessen" style="border:0;background:transparent">Passwort vergessen?</button>
+  </form>`;
+}
+
+function vergessenHtml() {
+  return `<form class="login glas" id="vergessen-form">
+    <h2 style="margin:0">Passwort zurücksetzen</h2>
+    <p class="neben" style="margin:0">Du bekommst eine E-Mail mit Link. Darüber legst du hier ein neues Passwort fest – es gilt auch in der Handy-App.</p>
+    <label class="feld"><span>E-Mail</span><input type="email" id="v-email" autocomplete="username" required value="${esc(S.formEmail ?? localStorage.getItem("oel_email") ?? "")}"></label>
+    ${meldungHtml()}${warten()}
+    <button class="knopf haupt" type="submit" ${S.laeuft ? "disabled" : ""}>Link senden</button>
+    <button class="knopf" type="button" data-a="zu-anmelden">Zurück zur Anmeldung</button>
+  </form>`;
+}
+
+function neuesPasswortHtml() {
+  return `<form class="login glas" id="passwort-form">
+    <h2 style="margin:0">Neues Passwort</h2>
+    <p class="neben" style="margin:0">Für ${esc(S.sitzung?.email || "")}</p>
+    <label class="feld"><span>Neues Passwort (mind. 6 Zeichen)</span><input type="password" id="n-pw" autocomplete="new-password" required minlength="6"></label>
+    <label class="feld"><span>Wiederholen</span><input type="password" id="n-pw2" autocomplete="new-password" required minlength="6"></label>
+    ${meldungHtml()}${warten()}
+    <button class="knopf haupt" type="submit" ${S.laeuft ? "disabled" : ""}>Passwort speichern</button>
   </form>`;
 }
 
@@ -689,6 +716,36 @@ function preiseHtml() {
   return html + `</div>`;
 }
 
+// ---------- Auswertung: Änderungsprotokoll (Verbrauch und Bestandswert folgen darüber) ----------
+const PROTOKOLL_BEREICH = { sorten: "Sorte", faesser: "Fass", lieferanten: "Lieferant", freigaben: "Freigabe", angebote: "Preis", lager: "Lager" };
+async function protokollLaden() {
+  try {
+    S.protokoll = await rest("GET", `/rest/v1/oellager_protokoll?select=zeit,wer,geraet,bereich,aktion,text&standort_id=eq.${S.standort}&order=zeit.desc&limit=300`);
+    S.protokollFuer = S.standort;
+  } catch (e) { S.protokoll = null; S.protokollFehler = e.message; }
+  if (S.tab === "auswertung") zeichnen();
+}
+function protokollHtml() {
+  if (S.protokollFuer !== S.standort) { protokollLaden(); return `<div class="glas leer">Wird geladen …</div>`; }
+  if (!S.protokoll) return `<div class="glas leer">${esc(S.protokollFehler || "Nicht verfügbar")}</div>`;
+  if (!S.protokoll.length) return `<div class="glas leer">Noch keine Änderungen aufgezeichnet.</div>`;
+  const heute = new Date().toDateString(), gestern = new Date(Date.now() - 864e5).toDateString();
+  const tage = new Map();
+  for (const e of S.protokoll) {
+    const d = new Date(e.zeit), k = d.toDateString();
+    const titel = k === heute ? "Heute" : k === gestern ? "Gestern" : d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
+    if (!tage.has(titel)) tage.set(titel, []);
+    tage.get(titel).push(e);
+  }
+  return [...tage].map(([t, liste]) => `<div class="abschnitt-titel">${esc(t)}</div><div class="glas">${liste.map((e) =>
+    `<div class="liste-zeile" style="cursor:default;align-items:flex-start"><div style="flex:1"><b>${esc(PROTOKOLL_BEREICH[e.bereich] || e.bereich)} ${esc(e.aktion)}:</b> ${esc(e.text)}
+      <div class="neben">${[new Date(e.zeit).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }), e.wer, e.geraet].filter(Boolean).map(esc).join(" · ")}</div></div></div>`).join("")}</div>`).join("");
+}
+function auswertungHtml() {
+  return `<div class="reihe" style="margin-top:14px"><b style="flex:1;font-size:17px">Änderungsprotokoll</b>
+    <button class="knopf klein" data-a="protokoll-neu">Aktualisieren</button></div>${protokollHtml()}`;
+}
+
 function stammHtml() {
   const lief = [...S.daten.lieferanten].sort((a, b) => a.name.localeCompare(b.name, "de"));
   const fr = S.daten.freigaben.filter((f) => !f.kategorie || f.kategorie === S.kat)
@@ -878,8 +935,10 @@ document.addEventListener("click", async (e) => {
     case "kat": S.kat = v; S.offen = null; zeichnen(); break;
     case "gruppe": S.offen = S.offen === v ? null : v; zeichnen(); break;
     case "brutto": S.brutto = !S.brutto; localStorage.setItem("oel_brutto", S.brutto ? "1" : "0"); zeichnen(); break;
+    case "protokoll-neu": S.protokollFuer = null; zeichnen(); break;
     case "zu-registrieren": S.ansicht = "registrieren"; S.meldung = ""; await standorteLaden(); zeichnen(); break;
     case "zu-anmelden": S.ansicht = "anmelden"; S.meldung = ""; zeichnen(); break;
+    case "zu-vergessen": S.formEmail = $("#l-email")?.value.trim() || S.formEmail; S.ansicht = "vergessen"; S.meldung = ""; zeichnen(); break;
     case "freigabe-pruefen": S.meldung = ""; try { await nachAnmeldung(null); } catch (err) { S.meldung = err.message; } zeichnen(); break;
     case "standort-oeffnen": dlg.close(); S.meldung = ""; try { await standortOeffnen(nr); } catch (err) { S.meldung = err.message; S.ansicht = "standortwahl"; } zeichnen(); break;
     case "standort-wechseln":
@@ -1031,6 +1090,26 @@ document.addEventListener("submit", async (e) => {
       await nachAnmeldung(sid);
     } catch (err) { S.meldung = err.message; }
     S.laeuft = false; zeichnen();
+  } else if (e.target.id === "vergessen-form") {
+    const email = $("#v-email").value.trim(); S.formEmail = email;
+    S.laeuft = true; zeichnen();
+    try {
+      await auth("/auth/v1/recover?redirect_to=" + encodeURIComponent(location.origin + location.pathname), { email });
+      S.ansicht = "anmelden"; S.meldung = "E-Mail verschickt – bitte den Link darin öffnen und ein neues Passwort festlegen.";
+    } catch (err) { S.meldung = err.message; }
+    S.laeuft = false; zeichnen();
+  } else if (e.target.id === "passwort-form") {
+    const pw = $("#n-pw").value;
+    if (pw !== $("#n-pw2").value) { S.meldung = "Passwörter stimmen nicht überein"; zeichnen(); return; }
+    S.laeuft = true; zeichnen();
+    try {
+      const r = await fetch(SB_URL + "/auth/v1/user", { method: "PUT",
+        headers: { apikey: SB_KEY, Authorization: "Bearer " + (await token()), "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(/should be different/i.test(j.msg || "") ? "Bitte ein anderes als das bisherige Passwort wählen" : (j.msg || j.message || "Fehlgeschlagen")); }
+      toast("Neues Passwort gespeichert");
+      S.meldung = ""; await nachAnmeldung(null);
+    } catch (err) { S.meldung = err.message; }
+    S.laeuft = false; zeichnen();
   } else if (e.target.id === "registrier-form") {
     const name = $("#r-name").value.trim(), email = $("#r-email").value.trim(), pw = $("#r-pw").value;
     const standorte = [...document.querySelectorAll('#r-standorte .chip[aria-pressed="true"]')].map((b) => Number(b.dataset.sid));
@@ -1058,8 +1137,26 @@ window.addEventListener("beforeunload", (e) => { if (S.ungespeichert) { e.preven
 (async function start() {
   try { const t = localStorage.getItem("oel_thema"); if (t) document.documentElement.dataset.theme = t; } catch (e) { /* */ }
   try { const x = localStorage.getItem("oel_sitzung"); if (x) S.sitzung = JSON.parse(x); } catch (e) { /* */ }
+  // Rückkehr aus einem E-Mail-Link (Bestätigung oder „Passwort vergessen“): Anmeldung steht im #-Teil der Adresse
+  const h = new URLSearchParams(location.hash.slice(1));
+  let wiederherstellen = false;
+  if (h.get("access_token")) {
+    try {
+      const nutz = JSON.parse(atob(h.get("access_token").split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      sitzungSpeichern({ access: h.get("access_token"), refresh: h.get("refresh_token"),
+        ablauf: Date.now() + (Number(h.get("expires_in")) || 3600) * 1000 - 60000, userId: nutz.sub, email: nutz.email });
+      localStorage.setItem("oel_email", nutz.email || "");
+      wiederherstellen = h.get("type") === "recovery";
+      if (h.get("type") === "signup") toast("E-Mail bestätigt – willkommen!");
+    } catch (e) { /* ungültiger Link */ }
+  } else if (h.get("error")) {
+    S.meldung = /expired|invalid/i.test(h.get("error_description") || "") ? "Der Link ist abgelaufen oder wurde schon benutzt – bitte neu anfordern." : (h.get("error_description") || "Link ungültig");
+  }
+  if (location.hash) history.replaceState(null, "", location.pathname);
   zeichnen();
   await standorteLaden();
+  if (wiederherstellen) { S.ansicht = "neues-passwort"; zeichnen(); }
+  else
   // Angemeldet geblieben (gleicher Browser): Standort trotzdem bei jedem Öffnen wählen
   if (S.sitzung) {
     try {
