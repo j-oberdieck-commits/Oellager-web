@@ -1,5 +1,5 @@
 // Nur die App-Hülle zwischenspeichern; Daten kommen immer frisch aus der Cloud.
-const CACHE = "oellager-web-v5";
+const CACHE = "oellager-web-v6";
 const DATEIEN = ["./", "index.html", "manifest.webmanifest", "icon.svg", "zusammenfuehren.js"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(DATEIEN))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
