@@ -1,0 +1,10 @@
+{
+  "name": "Öllager",
+  "short_name": "Öllager",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#DCE9EE",
+  "theme_color": "#1F4E5F",
+  "lang": "de",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

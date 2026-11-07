@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F4E5F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<script src="zusammenfuehren.js"></script>
+<title>Öllager</title>
+<style>
+/* Glaskacheln auf weichem Farbhintergrund – wie in der Android-App */
+:root {
+  --primary: #1F4E5F;
+  --on-primary: #ffffff;
+  --akzent: #B7791F;
+  --text: #161C1F;
+  --neben: #4A5559;
+  --glas: linear-gradient(135deg, rgba(255,255,255,.80), rgba(255,255,255,.45));
+  --kante: rgba(255,255,255,.95);
+  --linie: rgba(31,78,95,.14);
+  --hinter-a: #DCE9EE;
+  --hinter-b: #F3EEE4;
+  --fleck-1: rgba(111,187,208,.60);
+  --fleck-2: rgba(242,184,91,.55);
+  --fleck-3: rgba(154,174,242,.50);
+  --gut: #1E8A55;
+  --teuer: #C62828;
+  --feld: rgba(255,255,255,.7);
+  --schatten: 0 8px 28px rgba(22,28,31,.08);
+  --schrift: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --primary: #8FCBDD; --on-primary: #003544; --akzent: #F2B85B;
+    --text: #DEE3E5; --neben: #BFC8CB;
+    --glas: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.05));
+    --kante: rgba(255,255,255,.28); --linie: rgba(255,255,255,.12);
+    --hinter-a: #081115; --hinter-b: #0E1C23;
+    --fleck-1: rgba(31,113,137,.55); --fleck-2: rgba(183,121,31,.38); --fleck-3: rgba(57,73,168,.40);
+    --gut: #5CD69A; --teuer: #FF8A80; --feld: rgba(255,255,255,.08);
+    --schatten: none; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --primary: #8FCBDD; --on-primary: #003544; --akzent: #F2B85B;
+  --text: #DEE3E5; --neben: #BFC8CB;
+  --glas: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.05));
+  --kante: rgba(255,255,255,.28); --linie: rgba(255,255,255,.12);
+  --hinter-a: #081115; --hinter-b: #0E1C23;
+  --fleck-1: rgba(31,113,137,.55); --fleck-2: rgba(183,121,31,.38); --fleck-3: rgba(57,73,168,.40);
+  --gut: #5CD69A; --teuer: #FF8A80; --feld: rgba(255,255,255,.08);
+  --schatten: none; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--schrift); color: var(--text); font-size: 15px; line-height: 1.4;
+  background:
+    radial-gradient(circle at 5% 8%, var(--fleck-1), transparent 45%),
+    radial-gradient(circle at 100% 48%, var(--fleck-2), transparent 42%),
+    radial-gradient(circle at 15% 95%, var(--fleck-3), transparent 45%),
+    linear-gradient(180deg, var(--hinter-a), var(--hinter-b));
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+.huelle { max-width: 980px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-area-inset-bottom)); }
+header { position: sticky; top: 0; z-index: 5; padding: calc(10px + env(safe-area-inset-top)) 16px 8px;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.kopf { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+.kopf h1 { font-size: 22px; margin: 0; flex: 1; text-wrap: balance; }
+.kopf .unter { font-size: 12px; color: var(--neben); font-weight: 400; display: block; }
+.glas { background: var(--glas); border: 1px solid var(--kante); border-radius: 20px; box-shadow: var(--schatten);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); position: relative; overflow: hidden; }
+.glas::before { content: ""; position: absolute; inset: 0 0 45% 0; background: linear-gradient(180deg, rgba(255,255,255,.35), transparent); pointer-events: none; }
+:root[data-theme="dark"] .glas::before { background: linear-gradient(180deg, rgba(255,255,255,.08), transparent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .glas::before { background: linear-gradient(180deg, rgba(255,255,255,.08), transparent); } }
+.reihe { display: flex; gap: 10px; align-items: center; }
+.raster3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.kachel-zahl { padding: 10px 12px; }
+.kachel-zahl .l { font-size: 12px; color: var(--neben); }
+.kachel-zahl .w { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kachel-zahl.akzent .w { color: var(--primary); }
+.stapel { display: grid; gap: 12px; margin-top: 12px; }
+.seg { display: flex; background: var(--feld); border: 1px solid var(--linie); border-radius: 999px; padding: 3px; gap: 3px; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 8px 12px; border-radius: 999px; cursor: pointer; font-weight: 550; }
+.seg button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+.knopf { border: 1px solid var(--linie); background: var(--feld); padding: 8px 14px; border-radius: 12px; cursor: pointer; font-weight: 550; white-space: nowrap; }
+.knopf:hover { border-color: var(--primary); }
+.knopf.haupt { background: var(--primary); color: var(--on-primary); border-color: transparent; }
+.knopf.gefahr { color: var(--teuer); }
+.knopf.klein { padding: 5px 10px; font-size: 13px; }
+.icon { border: 0; background: transparent; cursor: pointer; padding: 8px; border-radius: 10px; font-size: 18px; }
+.icon:hover { background: var(--feld); }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+input[type=text], input[type=email], input[type=password], input[type=search], select, textarea {
+  width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--linie); background: var(--feld); }
+label.feld { display: grid; gap: 4px; font-size: 13px; color: var(--neben); }
+label.feld > span { padding-left: 2px; }
+.gruppe { cursor: pointer; }
+.gruppe-kopf { display: flex; align-items: center; gap: 12px; padding: 14px 16px 14px 12px; }
+.streifen { width: 6px; align-self: stretch; border-radius: 3px; min-height: 48px; }
+.gruppe-titel { font-size: 22px; font-weight: 750; }
+.neben { color: var(--neben); font-size: 13px; }
+.preis { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.preis.gut { color: var(--gut); } .preis.teuer { color: var(--teuer); }
+.innen { padding: 0 16px 12px 30px; border-top: 1px solid var(--linie); cursor: default; }
+.sorte { padding: 10px 0; border-bottom: 1px solid var(--linie); }
+.sorte:last-child { border-bottom: 0; }
+.fass { display: flex; gap: 10px; align-items: center; padding: 8px 10px; margin-top: 6px; border-radius: 12px; background: var(--feld); cursor: pointer; }
+.badge { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 750; font-size: 12px; flex: none; }
+.pille { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; background: rgba(31,78,95,.12); margin: 2px 4px 2px 0; }
+.pille.alarm { background: rgba(183,121,31,.18); }
+.pille.bester { background: var(--primary); color: var(--on-primary); }
+.liste-zeile { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--linie); cursor: pointer; }
+.liste-zeile:last-child { border-bottom: 0; }
+.abschnitt-titel { font-size: 14px; font-weight: 700; color: var(--primary); margin: 18px 4px 6px; }
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); background: color-mix(in srgb, var(--hinter-b) 70%, transparent); border-top: 1px solid var(--linie); }
+nav.tabs .seg { max-width: 600px; margin: 0 auto; }
+.leer { text-align: center; padding: 28px 16px; color: var(--neben); }
+.status { font-size: 12px; color: var(--neben); }
+.status.fehler { color: var(--teuer); }
+.hinweis { padding: 12px 14px; border-radius: 14px; background: rgba(183,121,31,.16); margin-top: 12px; }
+dialog { border: 0; padding: 0; background: transparent; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 24px); color: var(--text); }
+dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
+.dialog-innen { padding: 18px; display: grid; gap: 12px; max-height: calc(100vh - 40px); overflow: auto;
+  background: color-mix(in srgb, var(--hinter-b) 92%, transparent); border-radius: 20px; border: 1px solid var(--kante); }
+.dialog-innen h2 { margin: 0; font-size: 19px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--linie); background: var(--feld); border-radius: 999px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+.chip[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); border-color: transparent; }
+.login { max-width: 420px; margin: 12vh auto 0; padding: 24px; display: grid; gap: 14px; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(88px + env(safe-area-inset-bottom)); z-index: 20;
+  background: var(--text); color: var(--hinter-b); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100vw - 32px); }
+@media (min-width: 760px) {
+  .raster-gruppen { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+}
+@media (prefers-reduced-motion: no-preference) { .glas { transition: border-color .15s; } }
+</style>
+</head>
+<body>
+<header><div class="kopf" id="kopf"></div></header>
+<main class="huelle" id="app"><div class="leer">Wird geladen …</div></main>
+<nav class="tabs" id="tabs" hidden></nav>
+<dialog id="dialog"><div class="dialog-innen" id="dialog-innen"></div></dialog>
+
+<script>
+"use strict";
+// ---------- Verbindung (Supabase-Projekt „Oellager-webapp“, Frankfurt) ----------
+const SB_URL = "https://mykobsukqlrownycektl.supabase.co";
+const SB_KEY = "sb_publishable_gS2RdAZbARY-zn-e0A4fag_NoxLOTgb";
+
+const QUELLEN = [
+  { code: "WM", name: "WM SE" },
+  { code: "PVK", name: "PVK" },
+  { code: "KFZ24", name: "kfzteile24.de" }
+];
+const KATEGORIEN = {
+  OEL: { titel: "Motoröl", gruppe: "Viskosität", platzhalter: "z. B. 5W-30", groessen: [20, 60, 205, 208, 1000],
+         vorschlaege: ["0W-20", "0W-30", "5W-20", "5W-30", "5W-40", "10W-40", "15W-40"] },
+  KUEHL: { titel: "Kühlmittel", gruppe: "Typ", platzhalter: "z. B. G12evo", groessen: [5, 20, 60, 200, 1000],
+           vorschlaege: ["G11", "G12", "G12+", "G12++", "G12evo", "G13", "G30", "G40", "G48"] }
+};
+
+// ---------- Zustand ----------
+const S = {
+  sitzung: null, daten: null, version: null, geaendert: "", geraet: "", basis: null,
+  ansicht: "anmelden", standorte: [], meine: new Set(), ich: null, nutzer: [],
+  standort: Number(localStorage.getItem("oel_standort")) || null, meldung: "", laeuft: false,
+  tab: "lager", kat: "OEL", offen: null, suche: "", ungespeichert: false, speichert: false, fehler: "",
+  brutto: localStorage.getItem("oel_brutto") === "1", mwst: 19
+};
+
+// ---------- Hilfen ----------
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const eur = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" });
+const fmtEur = (v) => eur.format(v);
+const fmtP = (netto) => fmtEur(S.brutto ? netto * (1 + S.mwst / 100) : netto);
+const fmtZahl = (v) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100).replace(".", ","));
+function zahl(text) {
+  const t = String(text ?? "").replace(/[€\s]/g, "");
+  if (!t) return null;
+  const n = t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t;
+  const v = Number(n);
+  return Number.isFinite(v) ? v : null;
+}
+const naechsteId = (liste) => liste.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0) + 1;
+const anzeigename = (so) => {
+  const m = (so.marke || "").trim(), n = (so.name || "").trim();
+  if (!m) return n; if (!n) return m;
+  return n.toLowerCase().startsWith(m.toLowerCase()) ? n : `${m} ${n}`;
+};
+const viskoKey = (v) => String(v || "").toUpperCase().replace(/[\s-]/g, "");
+const literpreis = (f) => (f.gebindeL > 0 ? f.preisFass / f.gebindeL : 0);
+const schnitt = (faesser) => {
+  const l = faesser.reduce((s, f) => s + (f.gebindeL || 0), 0);
+  return l > 0 ? faesser.reduce((s, f) => s + (f.preisFass || 0), 0) / l : null;
+};
+const angebotLp = (a) => (a.preisGebinde != null && a.gebindeL > 0 ? a.preisGebinde / a.gebindeL : null);
+const jetztText = () => new Date().toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+function gruppenFarbe(key, kat) {
+  const k = key.toUpperCase();
+  if (kat === "OEL") {
+    const m = k.match(/^(\d+)W/);
+    const kalt = m ? Number(m[1]) : null;
+    return { 0: "#2E9E6A", 5: "#2F7FD1", 10: "#E08A1E", 15: "#C0533A" }[kalt] ?? (kalt == null ? "#7A8A90" : "#8E5BB5");
+  }
+  if (k.startsWith("G12EVO")) return "#8E44D9";
+  if (k.startsWith("G12++")) return "#B04BD0";
+  if (k.startsWith("G12+") || k === "G12") return "#E0457B";
+  if (k.startsWith("G13")) return "#A46BE0";
+  if (k.startsWith("G11")) return "#2BA6A0";
+  if (k.startsWith("G40")) return "#D9529A";
+  if (k.startsWith("G48")) return "#2E9E8F";
+  return k ? "#5C6BC0" : "#7A8A90";
+}
+const PALETTE = ["#2F7FD1", "#2E9E6A", "#E08A1E", "#8E5BB5", "#C0533A", "#2BA6A0", "#D9529A", "#5C6BC0"];
+function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
+function badge(marke) {
+  const w = String(marke || "?").trim().split(/[\s-]+/).filter(Boolean);
+  const k = w.length === 0 ? "?" : w.length === 1 ? w[0].slice(0, 2) : w[0][0] + w[1][0];
+  const f = PALETTE[hash(String(marke || "").toLowerCase()) % PALETTE.length];
+  return `<span class="badge" style="background:${f}2e;color:${f}">${esc(k.toUpperCase())}</span>`;
+}
+function toast(text) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = text; t.setAttribute("role", "status");
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+// ---------- Anmeldung (Supabase Auth, ohne Zusatzbibliothek) ----------
+function sitzungSpeichern(s) {
+  S.sitzung = s;
+  try { s ? localStorage.setItem("oel_sitzung", JSON.stringify(s)) : localStorage.removeItem("oel_sitzung"); } catch (e) { /* privat */ }
+}
+function sitzungAus(j) {
+  return { access: j.access_token, refresh: j.refresh_token, ablauf: Date.now() + (j.expires_in || 3600) * 1000 - 60000,
+           userId: j.user.id, email: j.user.email };
+}
+async function auth(pfad, body) {
+  const r = await fetch(SB_URL + pfad, { method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = j.msg || j.error_description || j.message || `HTTP ${r.status}`;
+    throw new Error(/Invalid login/i.test(m) ? "E-Mail oder Passwort falsch" : /not confirmed/i.test(m) ? "E-Mail noch nicht bestätigt – bitte den Link in der Mail öffnen"
+      : /already registered/i.test(m) ? "Diese E-Mail ist schon registriert – bitte anmelden" : /Password should/i.test(m) ? "Passwort zu kurz (mindestens 6 Zeichen)"
+      : /rate limit/i.test(m) ? "Zu viele Versuche – bitte kurz warten" : m);
+  }
+  return j;
+}
+async function token() {
+  const s = S.sitzung;
+  if (!s) throw new Error("Nicht angemeldet");
+  if (s.access && Date.now() < s.ablauf) return s.access;
+  const j = await auth("/auth/v1/token?grant_type=refresh_token", { refresh_token: s.refresh });
+  sitzungSpeichern(sitzungAus(j));
+  return S.sitzung.access;
+}
+async function rest(methode, pfad, body, extra = {}) {
+  const h = { apikey: SB_KEY, "Content-Type": "application/json", Accept: "application/json", ...extra };
+  if (S.sitzung) h.Authorization = "Bearer " + (await token());
+  const r = await fetch(SB_URL + pfad, { method: methode, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await r.text();
+  if (!r.ok) {
+    const m = (() => { try { return JSON.parse(text).message; } catch (e) { return text; } })() || `HTTP ${r.status}`;
+    throw new Error(/duplicate/i.test(m) ? "Diesen Namen gibt es schon" : /Kein Zugriff/i.test(m) ? "Kein Zugriff auf diesen Standort"
+      : /mindestens ein Admin/i.test(m) ? "Es muss mindestens ein Admin bleiben" : /Nur für Admins/i.test(m) ? "Nur Admins dürfen das" : m);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+// ---------- Daten laden und speichern ----------
+const leererStand = () => ({ app: "Öllager", datenbankVersion: 6, lieferanten: [], freigaben: [], sorten: [], faesser: [], angebote: [], historie: [] });
+
+async function standorteLaden() {
+  try { S.standorte = await rest("GET", "/rest/v1/oellager_standort?select=id,name&order=name"); } catch (e) { /* offline */ }
+}
+async function verwaltungLaden() {
+  const uid = S.sitzung.userId;
+  const ich = await rest("GET", `/rest/v1/oellager_nutzer?select=user_id,email,name,rolle,freigegeben&user_id=eq.${uid}`);
+  S.ich = ich[0] || null;
+  await standorteLaden();
+  if (!S.ich?.freigegeben) return;
+  S.meine = new Set((await rest("GET", `/rest/v1/oellager_mitglied?select=standort_id&user_id=eq.${uid}`)).map((m) => m.standort_id));
+  if (S.ich.rolle === "admin") {
+    const zu = await rest("GET", "/rest/v1/oellager_mitglied?select=user_id,standort_id");
+    S.nutzer = (await rest("GET", "/rest/v1/oellager_nutzer?select=user_id,email,name,rolle,freigegeben&order=erstellt"))
+      .map((n) => ({ ...n, standorte: new Set(zu.filter((z) => z.user_id === n.user_id).map((z) => z.standort_id)) }));
+  }
+}
+/** Nach der Anmeldung: Freigabe prüfen, dann gewählten Standort öffnen oder zur Standortwahl. */
+async function nachAnmeldung(gewuenscht) {
+  await verwaltungLaden();
+  if (!S.ich?.freigegeben) { S.ansicht = "warten"; return; }
+  const ziel = gewuenscht ?? (S.meine.size === 1 ? [...S.meine][0] : null);
+  if (ziel != null && S.meine.has(ziel)) { await standortOeffnen(ziel); return; }
+  if (gewuenscht != null) S.meldung = "Du bist dem gewählten Standort nicht zugeordnet.";
+  S.ansicht = "standortwahl";
+}
+async function standortOeffnen(id) {
+  if (S.ungespeichert) await speichern();
+  S.standort = id; localStorage.setItem("oel_standort", String(id));
+  S.ansicht = "app"; S.daten = null; zeichnen();
+  await laden();
+}
+const standortName = () => S.standorte.find((x) => x.id === S.standort)?.name || "";
+
+async function laden() {
+  const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version,geaendert,geraet,geaendert_von&standort_id=eq.${S.standort}`);
+  if (rows.length === 0) { S.daten = leererStand(); S.version = null; S.geaendert = ""; S.geraet = ""; }
+  else {
+    const d = rows[0].daten;
+    for (const k of ["lieferanten", "freigaben", "sorten", "faesser", "angebote", "historie"]) d[k] = d[k] || [];
+    S.daten = d; S.version = rows[0].version; S.geaendert = rows[0].geaendert;
+    S.geraet = [rows[0].geaendert_von, rows[0].geraet].filter(Boolean).join(" · ");
+  }
+  S.basis = JSON.parse(JSON.stringify(S.daten));
+  S.ungespeichert = false; S.fehler = "";
+}
+
+let speicherTimer = null;
+function geaendert() {
+  S.ungespeichert = true;
+  clearTimeout(speicherTimer);
+  speicherTimer = setTimeout(speichern, 700);
+  zeichnen();
+}
+/** Speichern mit Versionsprüfung. Hat inzwischen jemand anderes gespeichert, werden beide Stände zusammengeführt. */
+async function speichern() {
+  if (!S.ungespeichert || S.speichert) return;
+  S.speichert = true; kopfZeichnen();
+  try {
+    for (let runde = 0; runde < 4; runde++) {
+      const stand = JSON.parse(JSON.stringify(S.daten));
+      const v = await rest("POST", "/rest/v1/rpc/oellager_speichern",
+        { p_standort: S.standort, p_daten: stand, p_geraet: "Web-App", p_version: S.version });
+      if (v != null) {
+        S.version = v; S.basis = stand; S.geraet = "Web-App"; S.fehler = "";
+        // Während des Speicherns weiter getippt? Dann gleich nochmal
+        S.ungespeichert = !Zusammenfuehren.gleich(stand, S.daten);
+        if (S.ungespeichert) { clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 700); }
+        break;
+      }
+      const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version&standort_id=eq.${S.standort}`);
+      if (!rows.length) { S.version = null; continue; }
+      S.daten = Zusammenfuehren.zusammenfuehren(S.basis, S.daten, rows[0].daten);
+      S.basis = rows[0].daten; S.version = rows[0].version;
+      toast("Änderungen eines Kollegen wurden übernommen");
+      if (runde === 3) S.fehler = "Zu viele gleichzeitige Änderungen – bitte erneut speichern";
+    }
+  } catch (e) {
+    S.fehler = e.message;
+  }
+  S.speichert = false; zeichnen();
+}
+
+// ---------- Auswertungen ----------
+const sortenDer = (kat) => S.daten.sorten.filter((s) => (s.kategorie || "OEL") === kat);
+const faesserVon = (id) => S.daten.faesser.filter((f) => f.sorteId === id);
+const lieferant = (id) => S.daten.lieferanten.find((l) => l.id === id);
+const freigabe = (id) => S.daten.freigaben.find((f) => f.id === id);
+function gruppen(kat) {
+  const sorten = sortenDer(kat).filter((s) => s.aktiv !== false || faesserVon(s.id).length > 0);
+  const map = new Map();
+  for (const s of sorten) { const k = viskoKey(s.viskositaet); if (!map.has(k)) map.set(k, []); map.get(k).push(s); }
+  const zahlen = (k) => { const m = k.match(/(\d+)W(\d+)/); return m ? [Number(m[1]), Number(m[2])] : [999, 999]; };
+  return [...map.entries()].map(([key, liste]) => {
+    const mit = liste.find((s) => (s.viskositaet || "").trim());
+    const titel = mit ? (kat === "OEL" ? mit.viskositaet.trim().toUpperCase() : mit.viskositaet.trim()) : "Ohne " + KATEGORIEN[kat].gruppe;
+    const ids = new Set(liste.map((s) => s.id));
+    return { key, titel, sorten: liste.sort((a, b) => anzeigename(a).localeCompare(anzeigename(b), "de")),
+             faesser: S.daten.faesser.filter((f) => ids.has(f.sorteId)) };
+  }).sort((a, b) => (a.key === "") - (b.key === "") || zahlen(a.key)[0] - zahlen(b.key)[0] || zahlen(a.key)[1] - zahlen(b.key)[1] || a.key.localeCompare(b.key));
+}
+function preisMerken(sorteId, quelle, preisGebinde, gebindeL) {
+  if (!(gebindeL > 0)) return;
+  const lp = preisGebinde / gebindeL;
+  const alt = S.daten.historie.filter((h) => h.sorteId === sorteId && h.quelle === quelle).sort((a, b) => b.zeitpunkt - a.zeitpunkt)[0];
+  if (alt && Math.abs(alt.literpreis - lp) < 0.0005) return;
+  S.daten.historie.push({ id: naechsteId(S.daten.historie), sorteId, quelle, literpreis: lp, preisGebinde, gebindeL, zeitpunkt: Date.now() });
+}
+
+// ---------- Oberfläche ----------
+function kopfZeichnen() {
+  const st = S.ansicht !== "app" ? "" : S.speichert ? "speichert …" : S.ungespeichert ? "nicht gespeichert" :
+    S.fehler ? "Fehler: " + S.fehler : S.daten ? [standortName(), "gespeichert", S.ich?.name || S.sitzung?.email].filter(Boolean).join(" · ") : "";
+  $("#kopf").innerHTML = `
+    <h1>Öllager<span class="unter status ${S.fehler ? "fehler" : ""}">${esc(st)}</span></h1>
+    ${S.sitzung && S.ansicht === "app" ? `
+      <button class="icon" data-a="standort-wechseln" title="Standort wechseln" aria-label="Standort wechseln">⌖</button>
+      <button class="icon" data-a="entwickler" title="Entwicklermenü" aria-label="Entwicklermenü">⚙</button>
+      <button class="icon" data-a="brutto" title="Netto/Brutto umschalten" aria-label="Netto/Brutto umschalten">${S.brutto ? "Brutto" : "Netto"}</button>
+      <button class="icon" data-a="thema" title="Hell/Dunkel" aria-label="Hell oder dunkel">◐</button>
+      <button class="icon" data-a="neu-laden" title="Neu laden" aria-label="Neu laden">⟳</button>
+      <button class="icon" data-a="abmelden" title="Abmelden" aria-label="Abmelden">⎋</button>` : S.sitzung ? `
+      <button class="icon" data-a="abmelden" title="Abmelden" aria-label="Abmelden">⎋</button>` : ""}`;
+}
+
+function zeichnen() {
+  kopfZeichnen();
+  const app = $("#app");
+  if (S.ansicht !== "app") {
+    $("#tabs").hidden = true;
+    app.innerHTML = ({ anmelden: loginHtml, registrieren: registrierHtml, warten: warteHtml, standortwahl: standortWahlHtml })[S.ansicht]();
+    return;
+  }
+  if (!S.daten) { app.innerHTML = `<div class="leer">Wird geladen …</div>`; return; }
+  $("#tabs").hidden = false;
+  $("#tabs").innerHTML = `<div class="seg" role="tablist">${[["lager", "Lager"], ["sorten", "Sorten"], ["preise", "Preise"], ["stamm", "Stammdaten"]]
+    .map(([t, n]) => `<button role="tab" aria-pressed="${S.tab === t}" data-a="tab" data-v="${t}">${n}</button>`).join("")}</div>`;
+
+  let html = "";
+  {
+    html += `<div class="seg" style="margin-top:12px">${Object.entries(KATEGORIEN)
+      .map(([k, v]) => `<button aria-pressed="${S.kat === k}" data-a="kat" data-v="${k}">${v.titel}</button>`).join("")}</div>`;
+  }
+  html += ({ lager: lagerHtml, sorten: sortenHtml, preise: preiseHtml, stamm: stammHtml })[S.tab]();
+  app.innerHTML = html;
+}
+
+const meldungHtml = () => (S.meldung ? `<div class="status ${/angelegt|bestätig/i.test(S.meldung) ? "" : "fehler"}" style="font-size:14px">${esc(S.meldung)}</div>` : "");
+const warten = () => (S.laeuft ? `<div class="status">Bitte warten …</div>` : "");
+
+function standortSelect(id = "l-standort") {
+  if (!S.standorte.length) return `<p class="neben" style="margin:0">Noch kein Standort angelegt – das geht nach der Anmeldung.</p>`;
+  return `<label class="feld"><span>Standort</span><select id="${id}" required>
+    <option value="">Bitte wählen</option>
+    ${S.standorte.map((x) => `<option value="${x.id}" ${x.id === S.standort ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>`;
+}
+
+function loginHtml() {
+  return `<form class="login glas" id="login-form">
+    <h2 style="margin:0">Anmelden</h2>
+    <label class="feld"><span>E-Mail</span><input type="email" id="l-email" autocomplete="username" required value="${esc(S.formEmail ?? localStorage.getItem("oel_email") ?? "")}"></label>
+    <label class="feld"><span>Passwort</span><input type="password" id="l-pw" autocomplete="current-password" required minlength="6"></label>
+    ${standortSelect()}
+    ${meldungHtml()}${warten()}
+    <button class="knopf haupt" type="submit" ${S.laeuft ? "disabled" : ""}>Anmelden</button>
+    <button class="knopf" type="button" data-a="zu-registrieren">Neu registrieren</button>
+  </form>`;
+}
+
+function registrierHtml() {
+  return `<form class="login glas" id="registrier-form">
+    <h2 style="margin:0">Registrieren</h2>
+    <label class="feld"><span>Name</span><input type="text" id="r-name" autocomplete="name" required></label>
+    <label class="feld"><span>E-Mail</span><input type="email" id="r-email" autocomplete="username" required></label>
+    <label class="feld"><span>Passwort (mind. 6 Zeichen)</span><input type="password" id="r-pw" autocomplete="new-password" required minlength="6"></label>
+    <label class="feld"><span>Passwort wiederholen</span><input type="password" id="r-pw2" autocomplete="new-password" required minlength="6"></label>
+    <div class="feld"><span class="neben">Standorte (einen oder mehrere)</span>
+      ${S.standorte.length ? `<div class="chips" id="r-standorte">${S.standorte.map((x) => `<button type="button" class="chip" data-sid="${x.id}" aria-pressed="false">${esc(x.name)}</button>`).join("")}</div>`
+        : `<span class="neben">Noch keine Standorte – der erste Nutzer legt sie nach der Anmeldung an.</span>`}</div>
+    <p class="neben" style="margin:0">Nach der Registrierung muss ein Admin dein Konto freigeben.</p>
+    ${meldungHtml()}${warten()}
+    <button class="knopf haupt" type="submit" ${S.laeuft ? "disabled" : ""}>Konto anlegen</button>
+    <button class="knopf" type="button" data-a="zu-anmelden">Zurück zur Anmeldung</button>
+  </form>`;
+}
+
+function warteHtml() {
+  return `<div class="login glas"><h2 style="margin:0">Warten auf Freigabe</h2>
+    <p style="margin:0">Dein Konto ${esc(S.sitzung?.email)} ist angelegt. Ein Admin muss es noch freigeben – danach geht es hier weiter.</p>
+    ${meldungHtml()}<button class="knopf haupt" data-a="freigabe-pruefen">Erneut prüfen</button></div>`;
+}
+
+function standortWahlHtml() {
+  const liste = S.standorte.filter((x) => S.meine.has(x.id));
+  return `<div class="login glas"><h2 style="margin:0">Standort wählen</h2>
+    <p class="neben" style="margin:0">Angemeldet als ${esc(S.ich?.name || S.sitzung?.email)}</p>
+    ${liste.length ? liste.map((x) => `<button class="knopf haupt" data-a="standort-oeffnen" data-v="${x.id}">${esc(x.name)}</button>`).join("")
+      : `<p style="margin:0">Dir ist noch kein Standort zugeordnet. Lege einen an oder ordne dich einem zu (Entwicklermenü-PIN).</p>`}
+    ${meldungHtml()}<button class="knopf" data-a="entwickler">Standorte verwalten</button></div>`;
+}
+
+// ---------- Entwicklermenü (PIN) mit Standorten und Nutzern ----------
+const ENTWICKLER_PIN = "1104";
+function pinDialog() {
+  dialog("PIN eingeben", `<p class="neben" style="margin:0">Das Entwicklermenü ist mit einer 4-stelligen PIN geschützt.</p>
+    <input type="password" id="pin" inputmode="numeric" maxlength="4" autocomplete="off" aria-label="PIN">
+    <div class="status fehler" id="pin-fehler"></div>`,
+    `<button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="pin-ok">Öffnen</button>`);
+  const f = $("#pin"); f.focus();
+  f.addEventListener("input", () => { f.value = f.value.replace(/\D/g, ""); if (f.value.length === 4) pinPruefen(); });
+}
+function pinPruefen() {
+  if ($("#pin").value === ENTWICKLER_PIN) { S.entwicklerOffen = true; verwaltungDialog(); }
+  else { $("#pin").value = ""; $("#pin-fehler").textContent = "Falsche PIN"; }
+}
+function verwaltungDialog() {
+  const admin = S.ich?.rolle === "admin";
+  const theme = document.documentElement.dataset.theme || "system";
+  dialog("Entwicklermenü", `
+    <div class="abschnitt-titel" style="margin-top:0">Meine Standorte</div>
+    <div class="glas">${S.standorte.map((x) => `<div class="liste-zeile" style="cursor:default;flex-wrap:wrap">
+        <label class="reihe" style="flex:1 1 160px;min-width:0;cursor:pointer"><input type="checkbox" data-a="mein-standort" data-v="${x.id}" ${S.meine.has(x.id) ? "checked" : ""} style="width:20px;height:20px">
+        <span><b>${esc(x.name)}</b>${x.id === S.standort && S.ansicht === "app" ? ` <span class="pille">geöffnet</span>` : ""}</span></label>
+        <div class="reihe" style="margin-left:auto;gap:6px">
+        ${S.meine.has(x.id) && !(x.id === S.standort && S.ansicht === "app") ? `<button class="knopf klein" data-a="standort-oeffnen" data-v="${x.id}">Öffnen</button>` : ""}
+        <button class="knopf klein" data-a="standort-umbenennen" data-v="${x.id}">Umbenennen</button>
+        ${admin ? `<button class="knopf klein gefahr" data-a="standort-loeschen" data-v="${x.id}">Löschen</button>` : ""}
+      </div></div>`).join("") || `<div class="leer">Noch keine Standorte.</div>`}</div>
+    <div class="reihe"><input type="text" id="neuer-standort" placeholder="Neuer Standort, z. B. Werkstatt Nord"><button class="knopf haupt" data-a="standort-anlegen">Anlegen</button></div>
+    <p class="neben" style="margin:0">Jeder Standort hat sein eigenes Lager. Neue Standorte werden dir automatisch zugeordnet.</p>
+    ${admin ? `<div class="abschnitt-titel">Nutzer (Admin)</div><div class="glas">${S.nutzer.map((n) => `<div class="liste-zeile" style="cursor:default;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px"><b>${esc(n.name || n.email)}</b> ${!n.freigegeben ? `<span class="pille alarm">wartet</span>` : n.rolle === "admin" ? `<span class="pille">Admin</span>` : ""}
+          <div class="neben">${esc(n.email)}</div>
+          <div class="chips" style="margin-top:4px">${S.standorte.map((x) => `<button type="button" class="chip" data-a="nutzer-standort" data-v="${n.user_id}|${x.id}" aria-pressed="${n.standorte.has(x.id)}">${esc(x.name)}</button>`).join("")}</div></div>
+        ${n.user_id === S.sitzung.userId ? `<span class="neben">du</span>` : `
+          <button class="knopf klein ${n.freigegeben ? "" : "haupt"}" data-a="nutzer-frei" data-v="${n.user_id}">${n.freigegeben ? "Sperren" : "Freigeben"}</button>
+          <button class="knopf klein" data-a="nutzer-admin" data-v="${n.user_id}">${n.rolle === "admin" ? "Kein Admin" : "Admin"}</button>
+          <button class="knopf klein gefahr" data-a="nutzer-entfernen" data-v="${n.user_id}">Entfernen</button>`}
+      </div>`).join("")}</div>` : ""}
+    <div class="abschnitt-titel">Darstellung</div>
+    <div class="seg">${[["system", "Wie System"], ["light", "Hell"], ["dark", "Dunkel"]].map(([w, t]) => `<button aria-pressed="${theme === w}" data-a="thema-setzen" data-v="${w}">${t}</button>`).join("")}</div>`,
+    `<button class="knopf haupt" data-a="schliessen">Fertig</button>`);
+}
+async function verwalten(aktion, erfolg) {
+  try {
+    await aktion();
+    await verwaltungLaden();
+    if (erfolg) toast(erfolg);
+  } catch (e) { toast(e.message); }
+  if (dlg.open && S.entwicklerOffen) verwaltungDialog();
+  zeichnen();
+}
+
+function summenHtml(sorten, faesser) {
+  const sch = schnitt(faesser);
+  return `<div class="raster3" style="margin-top:12px">
+    <div class="glas kachel-zahl"><div class="l">Sorten</div><div class="w">${sorten.length}</div></div>
+    <div class="glas kachel-zahl"><div class="l">Fässer</div><div class="w">${faesser.length}</div></div>
+    <div class="glas kachel-zahl akzent"><div class="l">Ø Literpreis ${S.brutto ? "brutto" : "netto"}</div><div class="w">${sch != null ? fmtP(sch) : "–"}</div></div>
+  </div>`;
+}
+
+function lagerHtml() {
+  const gs = gruppen(S.kat);
+  const alle = gs.flatMap((g) => g.faesser);
+  const lps = alle.map(literpreis);
+  const min = Math.min(...lps), max = Math.max(...lps);
+  const farbe = (v) => (lps.length < 2 || max - min < 0.005 ? "" : v <= min + 0.005 ? "gut" : v >= max - 0.005 ? "teuer" : "");
+  const sorten = sortenDer(S.kat).filter((s) => s.aktiv !== false);
+  let html = summenHtml(sorten, alle);
+  html += `<div class="reihe" style="margin-top:12px"><input type="search" placeholder="Suchen: Marke, Sorte, Freigabe, Lagerplatz" data-a="suche" value="${esc(S.suche)}">
+    <button class="knopf haupt" data-a="sorte-neu">+ Sorte</button></div>`;
+  const q = S.suche.trim().toLowerCase();
+  const passt = (s) => !q || [s.name, s.marke, s.viskositaet, s.spezifikation, lieferant(s.lieferantId)?.name,
+    ...(s.freigabeIds || []).map((i) => freigabe(i)?.bezeichnung), ...faesserVon(s.id).map((f) => f.lagerplatz)]
+    .some((t) => String(t || "").toLowerCase().includes(q));
+  const gefiltert = gs.map((g) => ({ ...g, sorten: g.sorten.filter(passt) })).filter((g) => g.sorten.length);
+  if (!gefiltert.length) return html + `<div class="glas leer" style="margin-top:12px">${q ? "Keine Treffer." : `Noch keine ${KATEGORIEN[S.kat].titel}-Sorten. Lege oben eine an.`}</div>`;
+  html += `<div class="stapel raster-gruppen">`;
+  for (const g of gefiltert) {
+    const f = gruppenFarbe(g.key, S.kat);
+    const offen = q || S.offen === g.key;
+    const marken = [...new Set(g.sorten.map((s) => s.marke || s.name).filter(Boolean))].join(" · ");
+    const glp = g.faesser.map(literpreis);
+    const ab = glp.length ? Math.min(...glp) : null, bis = glp.length ? Math.max(...glp) : null;
+    html += `<div class="glas gruppe">
+      <div class="gruppe-kopf" data-a="gruppe" data-v="${esc(g.key)}" role="button" tabindex="0" aria-expanded="${!!offen}">
+        <span class="streifen" style="background:${f}"></span>
+        <div style="flex:1;min-width:0">
+          <div class="gruppe-titel" style="color:${f}">${esc(g.titel)}</div>
+          <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(marken || "Ohne Marke")}</div>
+          <div class="neben">${g.sorten.length} ${g.sorten.length === 1 ? "Sorte" : "Sorten"} · ${g.faesser.length} ${g.faesser.length === 1 ? "Fass" : "Fässer"}</div>
+        </div>
+        <div class="preis ${ab != null ? farbe(ab) : ""}">${ab == null ? `<span class="neben">Kein Fass</span>` :
+          `${ab === bis ? "" : "ab "}${fmtP(ab)}<div class="neben" style="font-weight:400">pro Liter${ab !== bis ? " · bis " + fmtP(bis) : ""}</div>`}</div>
+      </div>
+      ${offen ? `<div class="innen">${g.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div>` : ""}
+    </div>`;
+  }
+  return html + `</div>`;
+}
+
+function sorteImLagerHtml(s, farbe) {
+  const fs = faesserVon(s.id).sort((a, b) => String(a.lagerplatz).localeCompare(String(b.lagerplatz), "de"));
+  const sch = schnitt(fs);
+  const fr = (s.freigabeIds || []).map(freigabe).filter(Boolean);
+  return `<div class="sorte">
+    <div class="reihe">${badge(s.marke || s.name)}
+      <div style="flex:1;min-width:0"><b>${esc(anzeigename(s))}</b>${s.aktiv === false ? ` <span class="pille">ersetzt</span>` : ""}${s.nachbestellen ? ` <span class="pille alarm">nachbestellen</span>` : ""}
+        <div class="neben">${esc([s.spezifikation, s.lieferform, lieferant(s.lieferantId)?.name].filter(Boolean).join(" · "))}</div></div>
+      <div class="preis">${sch != null ? "Ø " + fmtP(sch) + " / L" : ""}</div>
+      <button class="knopf klein" data-a="sorte-bearbeiten" data-v="${s.id}">Ändern</button></div>
+    ${fr.length ? `<div style="margin:6px 0 0 42px">${fr.map((f) => `<span class="pille">${esc(f.bezeichnung)}</span>`).join("")}</div>` : ""}
+    <div style="margin-left:42px">
+      ${fs.map((f) => `<div class="fass" data-a="fass-bearbeiten" data-v="${f.id}" role="button" tabindex="0">
+        <div style="flex:1"><b>${esc(f.lagerplatz || "Ohne Lagerplatz")}</b>
+          <div class="neben">Gebinde ${fmtZahl(f.gebindeL)} L${f.lieferdatum ? " · geliefert " + esc(f.lieferdatum) : ""}</div></div>
+        <div class="preis">${fmtP(f.preisFass)}<div class="neben" style="font-weight:400">pro Fass</div></div>
+        <div class="preis ${farbe(literpreis(f))}" style="min-width:86px">${fmtP(literpreis(f))}<div class="neben" style="font-weight:400">pro Liter</div></div>
+      </div>`).join("")}
+      <button class="knopf klein" style="margin-top:8px" data-a="fass-neu" data-v="${s.id}">+ Fass</button>
+    </div>
+  </div>`;
+}
+
+function sortenHtml() {
+  const q = S.suche.trim().toLowerCase();
+  const sorten = sortenDer(S.kat).filter((s) => !q || [s.name, s.marke, s.viskositaet, s.spezifikation, s.artikelnummer, s.ean]
+    .some((t) => String(t || "").toLowerCase().includes(q))).sort((a, b) => anzeigename(a).localeCompare(anzeigename(b), "de"));
+  let html = `<div class="reihe" style="margin-top:12px"><input type="search" placeholder="Sorten durchsuchen" data-a="suche" value="${esc(S.suche)}">
+    <button class="knopf haupt" data-a="sorte-neu">+ Sorte</button></div>`;
+  if (!sorten.length) return html + `<div class="glas leer" style="margin-top:12px">Keine Sorten.</div>`;
+  html += `<div class="glas" style="margin-top:12px">`;
+  for (const s of sorten) {
+    const fs = faesserVon(s.id), sch = schnitt(fs);
+    html += `<div class="liste-zeile" data-a="sorte-bearbeiten" data-v="${s.id}" role="button" tabindex="0">${badge(s.marke || s.name)}
+      <div style="flex:1;min-width:0"><b>${esc(anzeigename(s))}</b>${s.aktiv === false ? ` <span class="pille">ersetzt</span>` : ""}
+      <div class="neben">${esc([s.viskositaet, s.spezifikation, lieferant(s.lieferantId)?.name, fs.length + (fs.length === 1 ? " Fass" : " Fässer")].filter(Boolean).join(" · "))}</div></div>
+      <div class="preis">${sch != null ? "Ø " + fmtP(sch) + " / L" : "–"}</div></div>`;
+  }
+  return html + `</div>`;
+}
+
+function preiseHtml() {
+  const sorten = sortenDer(S.kat).filter((s) => s.aktiv !== false).sort((a, b) => viskoKey(a.viskositaet).localeCompare(viskoKey(b.viskositaet)) || anzeigename(a).localeCompare(anzeigename(b), "de"));
+  let html = `<p class="neben" style="margin:12px 4px 0">Preise je Lieferant antippen zum Eintragen. Rabatte aus der Android-App werden hier nicht abgezogen.</p>`;
+  if (!sorten.length) return html + `<div class="glas leer" style="margin-top:12px">Keine Sorten.</div>`;
+  html += `<div class="stapel">`;
+  for (const s of sorten) {
+    const eigen = schnitt(faesserVon(s.id));
+    const ang = S.daten.angebote.filter((a) => a.sorteId === s.id);
+    const best = ang.filter((a) => angebotLp(a) != null).sort((a, b) => angebotLp(a) - angebotLp(b))[0];
+    html += `<div class="glas" style="padding:14px 16px">
+      <div class="reihe">${badge(s.marke || s.name)}<b style="flex:1">${esc(anzeigename(s))}</b><span class="neben">${esc(s.viskositaet || "")}</span></div>
+      ${s.zielpreis ? `<span class="pille alarm" style="margin-top:6px">Preisalarm bei ≤ ${fmtP(s.zielpreis)} / L</span>` : ""}
+      <div class="reihe" style="margin-top:8px"><span style="flex:1">Dein Einkauf</span><span class="preis">${eigen != null ? "Ø " + fmtP(eigen) + " / L" : `<span class="neben">kein Fass</span>`}</span></div>
+      ${QUELLEN.map((q) => {
+        const a = ang.find((x) => x.quelle === q.code); const lp = a ? angebotLp(a) : null;
+        return `<div class="fass" data-a="angebot" data-v="${s.id}|${q.code}" role="button" tabindex="0">
+          <div style="flex:1"><b>${q.name}</b><div class="neben">${a ? esc([a.artikelnummer && "Art.-Nr. " + a.artikelnummer, a.gebindeL && fmtZahl(a.gebindeL) + " L", a.stand].filter(Boolean).join(" · ")) : "Noch kein Preis – antippen"}</div></div>
+          <div class="preis">${lp != null ? fmtP(lp) + " / L" : "–"}${best && a === best ? `<div><span class="pille bester">Bester Preis</span></div>` : ""}</div></div>`;
+      }).join("")}
+      ${best && eigen ? `<div class="neben" style="margin-top:8px;font-weight:600">${angebotLp(best) < eigen - 0.005 ? `Bester Preis ist ${Math.round((eigen - angebotLp(best)) / eigen * 100)} % günstiger als dein Einkauf.` : "Dein Einkauf ist günstiger oder gleich."}</div>` : ""}
+    </div>`;
+  }
+  return html + `</div>`;
+}
+
+function stammHtml() {
+  const lief = [...S.daten.lieferanten].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  const fr = S.daten.freigaben.filter((f) => !f.kategorie || f.kategorie === S.kat)
+    .sort((a, b) => a.hersteller.localeCompare(b.hersteller, "de") || a.bezeichnung.localeCompare(b.bezeichnung, "de"));
+  let html = `<div class="abschnitt-titel">Lieferanten</div><div class="glas">`;
+  html += lief.map((l) => `<div class="liste-zeile" data-a="lieferant" data-v="${l.id}" role="button" tabindex="0">${badge(l.name)}
+    <div style="flex:1"><b>${esc(l.name)}</b><div class="neben">${esc([l.ansprechpartner, l.telefon, l.email].filter(Boolean).join(" · "))}</div></div></div>`).join("")
+    || `<div class="leer">Noch keine Lieferanten.</div>`;
+  html += `</div><button class="knopf" style="margin-top:8px" data-a="lieferant" data-v="neu">+ Lieferant</button>`;
+  html += `<div class="abschnitt-titel">Herstellerfreigaben (${KATEGORIEN[S.kat].titel})</div><div class="glas">`;
+  html += fr.map((f) => {
+    const n = S.daten.sorten.filter((s) => (s.freigabeIds || []).includes(f.id)).length;
+    return `<div class="liste-zeile" data-a="freigabe" data-v="${f.id}" role="button" tabindex="0"><div style="flex:1"><b>${esc(f.bezeichnung)}</b><div class="neben">${esc(f.hersteller)}</div></div><span class="neben">${n} ${n === 1 ? "Sorte" : "Sorten"}</span></div>`;
+  }).join("") || `<div class="leer">Noch keine Freigaben.</div>`;
+  return html + `</div><button class="knopf" style="margin-top:8px" data-a="freigabe" data-v="neu">+ Freigabe</button>`;
+}
+
+// ---------- Dialoge ----------
+const dlg = $("#dialog");
+dlg.addEventListener("close", () => { S.entwicklerOffen = false; });
+function dialog(titel, inhalt, knoepfe) {
+  $("#dialog-innen").innerHTML = `<h2>${esc(titel)}</h2>${inhalt}<div class="reihe" style="justify-content:flex-end;flex-wrap:wrap">${knoepfe}</div>`;
+  if (!dlg.open) dlg.showModal();
+}
+const feld = (id, label, wert = "", typ = "text", extra = "") =>
+  `<label class="feld"><span>${esc(label)}</span><input type="${typ}" id="${id}" value="${esc(wert)}" ${extra}></label>`;
+const wert = (id) => ($("#" + id)?.value ?? "").trim();
+
+function sorteDialog(s) {
+  const neu = !s;
+  s = s || { id: 0, name: "", marke: "", viskositaet: "", spezifikation: "", lieferantId: null, artikelnummer: "", notiz: "", aktiv: true,
+             ersetztDurchId: null, kategorie: S.kat, lieferform: "", ean: "", zielpreis: null, nachbestellen: false, freigabeIds: [] };
+  const k = KATEGORIEN[s.kategorie || "OEL"];
+  const gewaehlt = new Set(s.freigabeIds || []);
+  const fr = S.daten.freigaben.filter((f) => !f.kategorie || f.kategorie === (s.kategorie || "OEL"));
+  dialog(neu ? `Neue Sorte (${k.titel})` : "Sorte ändern", `
+    ${feld("d-marke", "Marke", s.marke)}${feld("d-name", "Produktname", s.name)}
+    ${feld("d-visko", k.gruppe, s.viskositaet, "text", `placeholder="${k.platzhalter}" list="d-visko-liste"`)}
+    <datalist id="d-visko-liste">${k.vorschlaege.map((v) => `<option value="${v}">`).join("")}</datalist>
+    ${feld("d-spez", "Spezifikation", s.spezifikation)}
+    ${s.kategorie === "KUEHL" ? feld("d-form", "Lieferform", s.lieferform, "text", `placeholder="Konzentrat oder Fertiggemisch -37 °C"`) : ""}
+    <label class="feld"><span>Lieferant</span><select id="d-lief"><option value="">Kein Lieferant</option>
+      ${S.daten.lieferanten.map((l) => `<option value="${l.id}" ${l.id === s.lieferantId ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
+    ${feld("d-artnr", "Artikelnummer beim Lieferanten", s.artikelnummer)}${feld("d-ean", "EAN / Barcode", s.ean)}
+    ${feld("d-ziel", "Preisalarm: Zielpreis €/L (netto)", s.zielpreis != null ? fmtZahl(s.zielpreis) : "", "text", `inputmode="decimal"`)}
+    <div class="feld"><span class="neben">Herstellerfreigaben</span><div class="chips" id="d-fr">
+      ${fr.map((f) => `<button type="button" class="chip" data-fid="${f.id}" aria-pressed="${gewaehlt.has(f.id)}">${esc(f.bezeichnung)}</button>`).join("") || `<span class="neben">Noch keine Freigaben (Stammdaten).</span>`}</div></div>
+    <label class="reihe"><input type="checkbox" id="d-nach" ${s.nachbestellen ? "checked" : ""}> Auf die Nachbestell-Liste</label>
+    <label class="feld"><span>Notiz</span><textarea id="d-notiz" rows="2">${esc(s.notiz)}</textarea></label>`,
+    `${neu ? "" : `<button class="knopf gefahr" data-a="sorte-loeschen" data-v="${s.id}">Löschen</button>`}
+     <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="sorte-speichern" data-v="${neu ? 0 : s.id}">Speichern</button>`);
+  $("#d-fr").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
+  });
+}
+function sorteSpeichern(id) {
+  const name = wert("d-name"), marke = wert("d-marke");
+  if (!name && !marke) { toast("Bitte Marke oder Produktname eintragen"); return; }
+  let s = S.daten.sorten.find((x) => x.id === id);
+  const kat = s ? (s.kategorie || "OEL") : S.kat;
+  if (!s) { s = { id: naechsteId(S.daten.sorten), aktiv: true, ersetztDurchId: null, kategorie: kat }; S.daten.sorten.push(s); }
+  const visko = wert("d-visko");
+  Object.assign(s, {
+    name, marke, viskositaet: kat === "OEL" ? visko.toUpperCase() : visko, spezifikation: wert("d-spez"),
+    lieferform: kat === "KUEHL" ? wert("d-form") : "", lieferantId: wert("d-lief") ? Number(wert("d-lief")) : null,
+    artikelnummer: wert("d-artnr"), ean: wert("d-ean"), zielpreis: (() => { const z = zahl(wert("d-ziel")); return z && z > 0 ? z : null; })(),
+    nachbestellen: $("#d-nach").checked, notiz: wert("d-notiz"),
+    freigabeIds: [...document.querySelectorAll('#d-fr .chip[aria-pressed="true"]')].map((b) => Number(b.dataset.fid))
+  });
+  dlg.close(); geaendert(); toast("Sorte gespeichert");
+}
+function sorteLoeschen(id) {
+  const s = S.daten.sorten.find((x) => x.id === id); if (!s) return;
+  const n = faesserVon(id).length;
+  if (!confirm(`„${anzeigename(s)}“${n ? ` mit ${n} ${n === 1 ? "Fass" : "Fässern"}` : ""} löschen?`)) return;
+  S.daten.sorten = S.daten.sorten.filter((x) => x.id !== id);
+  S.daten.sorten.forEach((x) => { if (x.ersetztDurchId === id) x.ersetztDurchId = null; });
+  S.daten.faesser = S.daten.faesser.filter((f) => f.sorteId !== id);
+  S.daten.angebote = S.daten.angebote.filter((a) => a.sorteId !== id);
+  S.daten.historie = S.daten.historie.filter((h) => h.sorteId !== id);
+  dlg.close(); geaendert(); toast("Gelöscht");
+}
+
+function fassDialog(f, sorteId) {
+  const neu = !f;
+  const so = S.daten.sorten.find((x) => x.id === (f ? f.sorteId : sorteId));
+  const k = KATEGORIEN[so?.kategorie || "OEL"];
+  f = f || { id: 0, sorteId, lagerplatz: "", gebindeL: k.groessen.includes(208) ? 208 : 20, preisFass: null, lieferdatum: new Date().toLocaleDateString("de-DE"), notiz: "" };
+  dialog(neu ? "Neues Fass" : "Fass ändern", `
+    <div class="neben">${esc(so ? anzeigename(so) : "")}</div>
+    ${feld("f-platz", "Lagerplatz", f.lagerplatz, "text", `placeholder="z. B. Regal A1"`)}
+    <div class="chips">${k.groessen.map((g) => `<button type="button" class="chip" data-g="${g}">${g} L</button>`).join("")}</div>
+    ${feld("f-groesse", "Gebindegröße (L)", fmtZahl(f.gebindeL), "text", `inputmode="decimal"`)}
+    <div class="seg"><button type="button" aria-pressed="true" data-modus="fass">Preis pro Fass</button><button type="button" aria-pressed="false" data-modus="liter">Preis pro Liter</button></div>
+    ${feld("f-preis", "Preis netto (€)", f.preisFass != null ? fmtZahl(f.preisFass) : "", "text", `inputmode="decimal"`)}
+    <div class="glas" style="padding:10px 12px"><span class="neben">Literpreis</span><div class="preis" style="text-align:left;font-size:20px" id="f-lp">–</div></div>
+    ${feld("f-datum", "Lieferdatum", f.lieferdatum)}
+    <label class="feld"><span>Notiz</span><textarea id="f-notiz" rows="2">${esc(f.notiz)}</textarea></label>`,
+    `${neu ? "" : `<button class="knopf gefahr" data-a="fass-loeschen" data-v="${f.id}">Löschen</button>`}
+     <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="fass-speichern" data-v="${neu ? 0 : f.id}" data-s="${f.sorteId}">Speichern</button>`);
+  let modus = "fass";
+  const rechnen = () => {
+    const g = zahl(wert("f-groesse")), p = zahl(wert("f-preis"));
+    const lp = g > 0 && p != null ? (modus === "fass" ? p / g : p) : null;
+    $("#f-lp").textContent = lp != null ? fmtEur(lp) + " pro Liter (netto)" : "–";
+  };
+  ["f-groesse", "f-preis"].forEach((id) => $("#" + id).addEventListener("input", rechnen));
+  $("#dialog-innen").querySelectorAll("[data-g]").forEach((b) => b.addEventListener("click", () => { $("#f-groesse").value = b.dataset.g; rechnen(); }));
+  $("#dialog-innen").querySelectorAll("[data-modus]").forEach((b) => b.addEventListener("click", () => {
+    const g = zahl(wert("f-groesse")), p = zahl(wert("f-preis"));
+    if (b.dataset.modus !== modus && g > 0 && p != null) $("#f-preis").value = fmtZahl(Math.round((b.dataset.modus === "liter" ? p / g : p * g) * 100) / 100);
+    modus = b.dataset.modus;
+    $("#dialog-innen").querySelectorAll("[data-modus]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    rechnen();
+  }));
+  dlg.dataset.modus = "fass";
+  dlg._modus = () => modus;
+  rechnen();
+}
+function fassSpeichern(id, sorteId) {
+  const g = zahl(wert("f-groesse")), p = zahl(wert("f-preis"));
+  if (!(g > 0) || p == null || p < 0) { toast("Bitte Gebindegröße und Preis eintragen"); return; }
+  const preisFass = Math.round((dlg._modus() === "liter" ? p * g : p) * 100) / 100;
+  let f = S.daten.faesser.find((x) => x.id === id);
+  if (!f) { f = { id: naechsteId(S.daten.faesser), sorteId }; S.daten.faesser.push(f); }
+  Object.assign(f, { lagerplatz: wert("f-platz"), gebindeL: g, preisFass, lieferdatum: wert("f-datum"), notiz: wert("f-notiz") });
+  preisMerken(f.sorteId, "EINKAUF", preisFass, g);
+  dlg.close(); geaendert(); toast("Fass gespeichert");
+}
+
+function angebotDialog(sorteId, quelle) {
+  const so = S.daten.sorten.find((x) => x.id === sorteId);
+  const q = QUELLEN.find((x) => x.code === quelle);
+  const a = S.daten.angebote.find((x) => x.sorteId === sorteId && x.quelle === quelle);
+  const k = KATEGORIEN[so?.kategorie || "OEL"];
+  dialog(q.name, `<div class="neben">${esc(anzeigename(so))} ${esc(so.viskositaet || "")}</div>
+    ${feld("a-artnr", "Artikelnummer bei " + q.name, a?.artikelnummer || "")}
+    ${feld("a-gebinde", "Gebindegröße (L)", a?.gebindeL != null ? fmtZahl(a.gebindeL) : String(k.groessen.includes(208) ? 208 : 20), "text", `inputmode="decimal"`)}
+    ${feld("a-preis", "Gebindepreis netto (€)", a?.preisGebinde != null ? fmtZahl(a.preisGebinde) : "", "text", `inputmode="decimal"`)}
+    ${feld("a-url", "Link zum Artikel (optional)", a?.url || "")}`,
+    `${a ? `<button class="knopf gefahr" data-a="angebot-loeschen" data-v="${sorteId}|${quelle}">Entfernen</button>` : ""}
+     <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="angebot-speichern" data-v="${sorteId}|${quelle}">Speichern</button>`);
+}
+function angebotSpeichern(sorteId, quelle) {
+  const g = zahl(wert("a-gebinde")), p = zahl(wert("a-preis")), artnr = wert("a-artnr");
+  if (p == null && !artnr) { toast("Bitte Preis oder Artikelnummer eintragen"); return; }
+  S.daten.angebote = S.daten.angebote.filter((x) => !(x.sorteId === sorteId && x.quelle === quelle));
+  S.daten.angebote.push({ sorteId, quelle, artikelnummer: artnr, preisGebinde: p, gebindeL: p != null ? g : null,
+    stand: jetztText(), herkunft: "manuell", url: wert("a-url"), hinweis: "" });
+  if (p != null && g > 0) preisMerken(sorteId, quelle, p, g);
+  dlg.close(); geaendert(); toast("Preis gespeichert");
+}
+
+function lieferantDialog(l) {
+  const neu = !l;
+  l = l || { id: 0, name: "", ansprechpartner: "", telefon: "", email: "", notiz: "" };
+  dialog(neu ? "Neuer Lieferant" : "Lieferant ändern",
+    `${feld("li-name", "Firmenname", l.name)}${feld("li-ap", "Ansprechpartner", l.ansprechpartner)}${feld("li-tel", "Telefon", l.telefon, "text", `inputmode="tel"`)}
+     ${feld("li-mail", "E-Mail", l.email, "email")}<label class="feld"><span>Notiz</span><textarea id="li-notiz" rows="2">${esc(l.notiz)}</textarea></label>`,
+    `${neu ? "" : `<button class="knopf gefahr" data-a="lieferant-loeschen" data-v="${l.id}">Löschen</button>`}
+     <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="lieferant-speichern" data-v="${neu ? 0 : l.id}">Speichern</button>`);
+}
+function freigabeDialog(f) {
+  const neu = !f;
+  f = f || { id: 0, hersteller: "", bezeichnung: "", kategorie: S.kat };
+  dialog(neu ? "Neue Freigabe" : "Freigabe ändern",
+    `${feld("fr-h", "Fahrzeughersteller", f.hersteller, "text", `placeholder="z. B. VW"`)}${feld("fr-b", "Freigabe / Norm", f.bezeichnung, "text", `placeholder="z. B. VW 504 00"`)}
+     <label class="feld"><span>Gilt für</span><select id="fr-k"><option value="OEL" ${f.kategorie === "OEL" ? "selected" : ""}>Motoröl</option>
+       <option value="KUEHL" ${f.kategorie === "KUEHL" ? "selected" : ""}>Kühlmittel</option><option value="" ${!f.kategorie ? "selected" : ""}>Beides</option></select></label>`,
+    `${neu ? "" : `<button class="knopf gefahr" data-a="freigabe-loeschen" data-v="${f.id}">Löschen</button>`}
+     <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="freigabe-speichern" data-v="${neu ? 0 : f.id}">Speichern</button>`);
+}
+
+// ---------- Ereignisse ----------
+document.addEventListener("click", async (e) => {
+  const chip = e.target.closest("#r-standorte .chip");
+  if (chip) { chip.setAttribute("aria-pressed", chip.getAttribute("aria-pressed") === "true" ? "false" : "true"); return; }
+  const el = e.target.closest("[data-a]"); if (!el || el.matches('input[type="checkbox"]')) return;
+  const a = el.dataset.a, v = el.dataset.v;
+  const nr = Number(v);
+  switch (a) {
+    case "tab": S.tab = v; S.suche = ""; zeichnen(); window.scrollTo(0, 0); break;
+    case "kat": S.kat = v; S.offen = null; zeichnen(); break;
+    case "gruppe": S.offen = S.offen === v ? null : v; zeichnen(); break;
+    case "brutto": S.brutto = !S.brutto; localStorage.setItem("oel_brutto", S.brutto ? "1" : "0"); zeichnen(); break;
+    case "zu-registrieren": S.ansicht = "registrieren"; S.meldung = ""; await standorteLaden(); zeichnen(); break;
+    case "zu-anmelden": S.ansicht = "anmelden"; S.meldung = ""; zeichnen(); break;
+    case "freigabe-pruefen": S.meldung = ""; try { await nachAnmeldung(null); } catch (err) { S.meldung = err.message; } zeichnen(); break;
+    case "standort-oeffnen": dlg.close(); S.meldung = ""; try { await standortOeffnen(nr); } catch (err) { S.meldung = err.message; S.ansicht = "standortwahl"; } zeichnen(); break;
+    case "standort-wechseln":
+      if (S.ungespeichert) await speichern();
+      S.meldung = ""; await verwaltungLaden().catch(() => {}); S.ansicht = "standortwahl"; zeichnen(); break;
+    case "entwickler": S.entwicklerOffen = false; pinDialog(); break;
+    case "pin-ok": pinPruefen(); break;
+    case "standort-anlegen": {
+      const name = wert("neuer-standort"); if (!name) return;
+      await verwalten(async () => {
+        const neu = await rest("POST", "/rest/v1/oellager_standort?select=id", { name }, { Prefer: "return=representation" });
+        await rest("POST", "/rest/v1/oellager_mitglied", { user_id: S.sitzung.userId, standort_id: neu[0].id }, { Prefer: "resolution=ignore-duplicates" });
+      }, `Standort „${name}“ angelegt`);
+      break;
+    }
+    case "standort-umbenennen": {
+      const alt = S.standorte.find((x) => x.id === nr); const name = prompt("Neuer Name", alt?.name || "");
+      if (name && name.trim()) await verwalten(() => rest("POST", "/rest/v1/rpc/oellager_standort_umbenennen", { p_id: nr, p_name: name.trim() }), "Umbenannt");
+      break;
+    }
+    case "standort-loeschen": {
+      if (nr === S.standort && S.ansicht === "app") { toast("Der geöffnete Standort kann nicht gelöscht werden"); return; }
+      const x = S.standorte.find((y) => y.id === nr);
+      if (confirm(`„${x?.name}“ mit dem kompletten Lager für alle Nutzer löschen?`)) {
+        await verwalten(() => rest("DELETE", `/rest/v1/oellager_standort?id=eq.${nr}`), "Standort gelöscht");
+      }
+      break;
+    }
+    case "nutzer-standort": {
+      const [uid, sid] = v.split("|"); const an = el.getAttribute("aria-pressed") !== "true";
+      await verwalten(() => an
+        ? rest("POST", "/rest/v1/oellager_mitglied", { user_id: uid, standort_id: Number(sid) }, { Prefer: "resolution=ignore-duplicates" })
+        : rest("DELETE", `/rest/v1/oellager_mitglied?user_id=eq.${uid}&standort_id=eq.${sid}`), "Gespeichert");
+      break;
+    }
+    case "nutzer-frei": case "nutzer-admin": {
+      const n = S.nutzer.find((x) => x.user_id === v);
+      const frei = a === "nutzer-frei" ? !n.freigegeben : n.freigegeben || n.rolle !== "admin";
+      const rolle = a === "nutzer-admin" ? (n.rolle === "admin" ? "nutzer" : "admin") : n.rolle;
+      await verwalten(() => rest("POST", "/rest/v1/rpc/oellager_nutzer_setzen", { p_user: v, p_freigegeben: frei, p_rolle: rolle }), "Gespeichert");
+      break;
+    }
+    case "nutzer-entfernen":
+      if (confirm("Zugang dieses Nutzers entfernen? Er müsste sich neu registrieren.")) {
+        await verwalten(() => rest("DELETE", `/rest/v1/oellager_nutzer?user_id=eq.${v}`), "Zugang entfernt");
+      }
+      break;
+    case "thema-setzen": {
+      const r = document.documentElement;
+      if (v === "system") { delete r.dataset.theme; localStorage.removeItem("oel_thema"); } else { r.dataset.theme = v; localStorage.setItem("oel_thema", v); }
+      verwaltungDialog(); break;
+    }
+    case "thema": {
+      const r = document.documentElement;
+      const dunkel = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      r.dataset.theme = dunkel ? "light" : "dark"; localStorage.setItem("oel_thema", r.dataset.theme); break;
+    }
+    case "neu-laden": try { await laden(); zeichnen(); toast("Aktueller Stand geladen"); } catch (err) { toast(err.message); } break;
+    case "abmelden":
+      if (confirm("Abmelden?")) {
+        if (S.ungespeichert) await speichern();
+        sitzungSpeichern(null); S.daten = null; S.ich = null; S.ansicht = "anmelden"; S.meldung = ""; await standorteLaden(); zeichnen();
+      } break;
+    case "schliessen": dlg.close(); break;
+    case "sorte-neu": sorteDialog(null); break;
+    case "sorte-bearbeiten": sorteDialog(S.daten.sorten.find((x) => x.id === nr)); break;
+    case "sorte-speichern": sorteSpeichern(nr); break;
+    case "sorte-loeschen": sorteLoeschen(nr); break;
+    case "fass-neu": fassDialog(null, nr); break;
+    case "fass-bearbeiten": fassDialog(S.daten.faesser.find((x) => x.id === nr)); break;
+    case "fass-speichern": fassSpeichern(nr, Number(el.dataset.s)); break;
+    case "fass-loeschen": if (confirm("Fass löschen?")) { S.daten.faesser = S.daten.faesser.filter((x) => x.id !== nr); dlg.close(); geaendert(); } break;
+    case "angebot": { const [s, q] = v.split("|"); angebotDialog(Number(s), q); break; }
+    case "angebot-speichern": { const [s, q] = v.split("|"); angebotSpeichern(Number(s), q); break; }
+    case "angebot-loeschen": { const [s, q] = v.split("|"); S.daten.angebote = S.daten.angebote.filter((x) => !(x.sorteId === Number(s) && x.quelle === q)); dlg.close(); geaendert(); break; }
+    case "lieferant": lieferantDialog(v === "neu" ? null : S.daten.lieferanten.find((x) => x.id === nr)); break;
+    case "lieferant-speichern": {
+      const name = wert("li-name"); if (!name) { toast("Bitte Firmenname eintragen"); return; }
+      let l = S.daten.lieferanten.find((x) => x.id === nr);
+      if (!l) { l = { id: naechsteId(S.daten.lieferanten) }; S.daten.lieferanten.push(l); }
+      Object.assign(l, { name, ansprechpartner: wert("li-ap"), telefon: wert("li-tel"), email: wert("li-mail"), notiz: wert("li-notiz") });
+      dlg.close(); geaendert(); break;
+    }
+    case "lieferant-loeschen":
+      if (confirm("Lieferant löschen? Sorten bleiben erhalten.")) {
+        S.daten.lieferanten = S.daten.lieferanten.filter((x) => x.id !== nr);
+        S.daten.sorten.forEach((s) => { if (s.lieferantId === nr) s.lieferantId = null; });
+        dlg.close(); geaendert();
+      } break;
+    case "freigabe": freigabeDialog(v === "neu" ? null : S.daten.freigaben.find((x) => x.id === nr)); break;
+    case "freigabe-speichern": {
+      const b = wert("fr-b"), h = wert("fr-h"); if (!b || !h) { toast("Bitte Hersteller und Bezeichnung eintragen"); return; }
+      let f = S.daten.freigaben.find((x) => x.id === nr);
+      if (!f) { f = { id: naechsteId(S.daten.freigaben) }; S.daten.freigaben.push(f); }
+      Object.assign(f, { hersteller: h, bezeichnung: b, kategorie: $("#fr-k").value });
+      dlg.close(); geaendert(); break;
+    }
+    case "freigabe-loeschen":
+      if (confirm("Freigabe löschen? Sie wird bei allen Sorten entfernt.")) {
+        S.daten.freigaben = S.daten.freigaben.filter((x) => x.id !== nr);
+        S.daten.sorten.forEach((s) => { s.freigabeIds = (s.freigabeIds || []).filter((i) => i !== nr); });
+        dlg.close(); geaendert();
+      } break;
+  }
+});
+document.addEventListener("change", async (e) => {
+  if (e.target.dataset.a !== "mein-standort") return;
+  const sid = Number(e.target.dataset.v), an = e.target.checked;
+  if (!an && sid === S.standort && S.ansicht === "app") { e.target.checked = true; toast("Erst zu einem anderen Standort wechseln"); return; }
+  await verwalten(() => an
+    ? rest("POST", "/rest/v1/oellager_mitglied", { user_id: S.sitzung.userId, standort_id: sid }, { Prefer: "resolution=ignore-duplicates" })
+    : rest("DELETE", `/rest/v1/oellager_mitglied?user_id=eq.${S.sitzung.userId}&standort_id=eq.${sid}`), an ? "Standort hinzugefügt" : "Standort abgewählt");
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.dataset.a === "suche") {
+    S.suche = e.target.value;
+    const pos = e.target.selectionStart;
+    zeichnen();
+    const neu = document.querySelector('[data-a="suche"]');
+    if (neu) { neu.focus(); neu.setSelectionRange(pos, pos); }
+  }
+});
+document.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (S.laeuft) return;
+  S.meldung = "";
+  if (e.target.id === "login-form") {
+    const email = $("#l-email").value.trim(), pw = $("#l-pw").value;
+    const sid = $("#l-standort") ? Number($("#l-standort").value) || null : null;
+    S.formEmail = email; if (sid) S.standort = sid;
+    if (S.standorte.length && !sid) { S.meldung = "Bitte einen Standort wählen"; zeichnen(); return; }
+    S.laeuft = true; zeichnen();
+    try {
+      const j = await auth("/auth/v1/token?grant_type=password", { email, password: pw });
+      sitzungSpeichern(sitzungAus(j)); localStorage.setItem("oel_email", email);
+      await nachAnmeldung(sid);
+    } catch (err) { S.meldung = err.message; }
+    S.laeuft = false; zeichnen();
+  } else if (e.target.id === "registrier-form") {
+    const name = $("#r-name").value.trim(), email = $("#r-email").value.trim(), pw = $("#r-pw").value;
+    const standorte = [...document.querySelectorAll('#r-standorte .chip[aria-pressed="true"]')].map((b) => Number(b.dataset.sid));
+    if (pw !== $("#r-pw2").value) { S.meldung = "Passwörter stimmen nicht überein"; zeichnen(); return; }
+    if (S.standorte.length && !standorte.length) { S.meldung = "Bitte mindestens einen Standort wählen"; zeichnen(); return; }
+    S.laeuft = true; zeichnen();
+    try {
+      const j = await auth("/auth/v1/signup", { email, password: pw, data: { name, standorte } });
+      localStorage.setItem("oel_email", email);
+      if (j.access_token) { sitzungSpeichern(sitzungAus(j)); await nachAnmeldung(standorte.length === 1 ? standorte[0] : null); }
+      else { S.ansicht = "anmelden"; S.meldung = "Konto angelegt. Bitte den Bestätigungslink in der E-Mail öffnen und dich dann anmelden."; }
+    } catch (err) { S.meldung = err.message; }
+    S.laeuft = false; zeichnen();
+  }
+});
+// Beim Zurückkehren in den Tab neuen Stand holen (z. B. nach Änderungen auf dem Handy)
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && S.ansicht === "app" && S.daten && !S.ungespeichert && !dlg.open) {
+    try { await laden(); zeichnen(); } catch (e) { /* offline */ }
+  }
+});
+window.addEventListener("beforeunload", (e) => { if (S.ungespeichert) { e.preventDefault(); e.returnValue = ""; } });
+
+// ---------- Start ----------
+(async function start() {
+  try { const t = localStorage.getItem("oel_thema"); if (t) document.documentElement.dataset.theme = t; } catch (e) { /* */ }
+  try { const x = localStorage.getItem("oel_sitzung"); if (x) S.sitzung = JSON.parse(x); } catch (e) { /* */ }
+  zeichnen();
+  await standorteLaden();
+  // Angemeldet geblieben (gleicher Browser): Standort trotzdem bei jedem Öffnen wählen
+  if (S.sitzung) {
+    try {
+      await verwaltungLaden();
+      S.ansicht = S.ich?.freigegeben ? "standortwahl" : "warten";
+    }
+    catch (err) { sitzungSpeichern(null); S.ansicht = "anmelden"; S.meldung = /abgelaufen|refresh|JWT|token/i.test(err.message) ? "Bitte erneut anmelden" : err.message; }
+  }
+  zeichnen();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>
