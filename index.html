@@ -2,11 +2,15 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://mykobsukqlrownycektl.supabase.co; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://mykobsukqlrownycektl.supabase.co wss://mykobsukqlrownycektl.supabase.co; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1F4E5F">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Öllager">
+<link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <script src="zusammenfuehren.js"></script>
@@ -201,6 +205,13 @@ body.nur-lesen [data-a$="-speichern"], body.nur-lesen [data-a$="-loeschen"], bod
   @keyframes schimmer { to { transform: translateX(100%); } }
   @keyframes einblenden { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 }
+.kommentar { margin: 6px 0 0 42px; padding: 6px 10px; border-radius: 10px; background: rgba(183,121,31,.14); font-size: 13px; cursor: pointer; }
+.lp-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; margin-top: 6px; }
+.lp-platz { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px; border-radius: 12px; border: 1px solid rgba(0,0,0,.12);
+  background: rgba(255,255,255,.45); color: inherit; font: inherit; font-size: 12px; cursor: pointer; min-height: 64px; }
+.lp-platz span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.lp-platz.belegt { background: rgba(31,78,95,.14); }
+.lp-platz.treffer { background: var(--akzent); color: #fff; }
 </style>
 </head>
 <body>

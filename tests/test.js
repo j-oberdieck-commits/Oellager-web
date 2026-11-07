@@ -60,6 +60,7 @@ async function handler(route) {
     if (m === "GET") { const uid = (q.user_id || "").replace("eq.", ""); return json(route, db.mitglied.filter((x) => !uid || x.user_id === uid).map((x) => ({ darf_aendern: false, ...x }))); }
     if (m === "POST") { db.mitglied.push(body); return route.fulfill({ status: 201, body: "" }); }
   }
+  if (p === "/rest/v1/oellager_signal") { const b = db.bestand[Number(String(q.standort_id).replace("eq.", ""))]; return json(route, b ? [{ version: b.version }] : []); }
   if (p === "/rest/v1/oellager_bestand" && !q.standort_id) return json(route, Object.entries(db.bestand).map(([k, v]) => ({ standort_id: Number(k), daten: v.daten })));
   if (p === "/rest/v1/oellager_bestand") {
     const sid = Number(q.standort_id.replace("eq.", ""));
@@ -268,12 +269,22 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.waitForSelector("text=Standort wählen");
   await page.click('#app [data-a="standort-oeffnen"][data-v="1"]');
   await page.waitForSelector("text=Offline");
-  ok("Offline: Stand aus dem Speicher, nur lesen", (await page.textContent("#app")).includes("Liqui Moly") && !(await page.isVisible('[data-a="sorte-neu"]')));
+  ok("Offline: Stand aus dem Speicher, Bearbeiten möglich", (await page.textContent("#app")).includes("Liqui Moly") && (await page.textContent("#app")).includes("sobald wieder Netz da ist"));
   await page.screenshot({ path: SCHIRM + "8-offline.png" });
+  // Offline eine Sorte anlegen – wird beim nächsten Online-Start zusammengeführt gespeichert
+  const sortenVorher = db.bestand[1].daten.sorten.length;
+  await page.click('[data-a="tab"][data-v="sorten"]');
+  await page.click('#app [data-a="sorte-neu"]');
+  await page.fill("#d-marke", "Offline"); await page.fill("#d-name", "Testöl"); await page.fill("#d-visko", "0W-16");
+  await page.click('[data-a="sorte-speichern"]');
+  await page.locator("#kopf", { hasText: "offline" }).waitFor();
   offline = false;
   await page.reload(); await page.waitForSelector("text=Standort wählen");
   await page.click('#app [data-a="standort-oeffnen"][data-v="1"]');
   await page.waitForSelector('[data-a="sorte-neu"]');
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
+  ok("Offline-Änderung nach dem Verbinden gespeichert", db.bestand[1].daten.sorten.length === sortenVorher + 1 && db.bestand[1].daten.sorten.some((x) => x.marke === "Offline"));
+  await page.click('[data-a="tab"][data-v="lager"]');
   // Verkaufspreis: Aufschlag 40 % → Kundenpreis = netto * 1,4 * 1,19
   await page.click('[data-a="tab"][data-v="stamm"]');
   await page.fill("#aufschlag", "40"); await page.click('[data-a="aufschlag-speichern"]');
@@ -302,6 +313,50 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   ok("Datenblatt hochgeladen (PDF, Name bereinigt)", db.blattTyp === "application/pdf" && /^Datenblatt_Oel_\d{4}-\d{2}-\d{2}_\d{6}\.pdf$/.test(db.blaetter[0]));
   await page.screenshot({ path: SCHIRM + "9-sorte.png", fullPage: true });
   await page.click('#dialog [data-a="schliessen"]');
+  // Kommentar und Freigaben-Bibliothek
+  await page.click('#app [data-a="sorte-bearbeiten"]');
+  await page.fill("#k-neu", "Nur für Kunde Müller"); await page.click('[data-a="kommentar-speichern"]');
+  await page.click("#dialog summary");
+  await page.fill("#d-bib-filter", "LL-04".replace("LL-", "Longlife-"));
+  await page.click('#d-bib .chip[data-bez="BMW Longlife-04"]');
+  await page.click('[data-a="sorte-speichern"]');
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
+  const dS = db.bestand[1].daten;
+  const bmw = dS.freigaben.find((f) => f.bezeichnung === "BMW Longlife-04");
+  ok("Kommentar gespeichert und angezeigt", dS.kommentare?.[0]?.text === "Nur für Kunde Müller" && await page.isVisible("text=Nur für Kunde Müller"));
+  ok("Freigabe aus der Bibliothek angelegt und gewählt", !!bmw && bmw.hersteller === "BMW" && dS.sorten.some((x) => (x.freigabeIds || []).includes(bmw.id)));
+  // Lagerplan: Regal anlegen, Fass umstellen, „Wo steht …?“
+  await kopf(page, "lagerplan");
+  await page.fill("#lp-regale", "A:4"); await page.click('[data-a="lp-regale-speichern"]');
+  await page.click('[data-a="lp-platz"][data-v="A2"]');
+  const fassId = dS.faesser.find((f) => !f.leerAm).id;
+  await page.selectOption("#lp-hierher", String(fassId));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
+  ok("Lagerplan gespeichert, Fass nach A2 gestellt", db.bestand[1].daten.lagerplan?.regale?.[0]?.plaetze === 4 && db.bestand[1].daten.faesser.find((f) => f.id === fassId).lagerplatz === "A2");
+  await page.click('[data-a="lagerplan"]');
+  const markeA2 = dS.sorten.find((x) => x.id === dS.faesser.find((f) => f.id === fassId).sorteId).marke;
+  await page.fill("#lp-suche", markeA2); await page.press("#lp-suche", "Enter");
+  await page.waitForSelector(".lp-platz.treffer");
+  ok("Wo steht …? markiert den Platz", await page.isVisible("#lp-treffer >> text=A2"));
+  await page.click('#dialog [data-a="schliessen"]');
+  // Doppelte Sorten zusammenführen
+  const d1 = db.bestand[1].daten, vorlage = d1.sorten[0];
+  d1.sorten.push({ ...vorlage, id: 99, freigabeIds: [] }); d1.faesser.push({ id: 99, sorteId: 99, gebindeL: 60, preisFass: 300, lagerplatz: "B1" });
+  db.bestand[1].version++;
+  await kopf(page, "neu-laden"); await page.waitForTimeout(400);
+  await kopf(page, "doppelte");
+  await page.click(`#dialog [data-a="doppelt-behalten"][data-v="${vorlage.id}"]`);
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
+  const d2 = db.bestand[1].daten;
+  ok("Doppelte Sorte zusammengeführt, Fass umgehängt", !d2.sorten.some((x) => x.id === 99) && d2.faesser.find((f) => f.id === 99)?.sorteId === vorlage.id);
+  await page.click('#dialog [data-a="schliessen"]');
+  // Live: Kollege speichert → neuer Stand kommt ohne Neuladen (Abfrage alle 20 s)
+  db.bestand[1].daten = { ...JSON.parse(JSON.stringify(db.bestand[1].daten)), lieferanten: [...db.bestand[1].daten.lieferanten, { id: 77, name: "Live-Lieferant" }] };
+  db.bestand[1].version++;
+  await page.click('[data-a="tab"][data-v="stamm"]');
+  await page.waitForSelector("text=Live-Lieferant", { timeout: 30000 });
+  ok("Live-Aktualisierung übernimmt Änderung eines Kollegen", true);
+  await page.click('[data-a="tab"][data-v="lager"]');
   // Sicherungen
   await entwickler(page);
   await page.click('[data-a="sicherungen"]');

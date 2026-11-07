@@ -185,7 +185,55 @@ async function standortOeffnen(id) {
   S.standort = id; localStorage.setItem("oel_standort", String(id));
   S.ansicht = "app"; S.daten = null; zeichnen();
   await laden();
+  liveVerbinden();
 }
+
+// ---------- Live: Änderungen anderer sofort übernehmen ----------
+let ws = null, wsStandort = null, wsHerz = null, wsRef = 0, liveLaeuft = false;
+/** Neuen Stand holen; eigene ungespeicherte Änderungen werden dabei zusammengeführt. */
+async function aktualisieren() {
+  if (liveLaeuft || S.speichert || S.ansicht !== "app" || !S.daten || S.offline) return;
+  liveLaeuft = true;
+  try {
+    if (S.ungespeichert) await speichern();
+    else if (!dlg.open) {
+      const vorher = S.version;
+      await laden();
+      if (S.version !== vorher) { zeichnen(); toast("Neuer Stand" + (S.geraet ? " von " + S.geraet : "")); }
+    }
+  } catch (e) { /* offline */ }
+  liveLaeuft = false;
+}
+async function liveVerbinden() {
+  if (!("WebSocket" in window) || !S.sitzung || S.ansicht !== "app" || S.offline) return;
+  if (ws && wsStandort === S.standort && ws.readyState <= 1) return;
+  try { ws?.close(); } catch (e) { /* */ }
+  wsStandort = S.standort;
+  const t = await token().catch(() => null); if (!t) return;
+  const sock = new WebSocket(SB_URL.replace("https", "wss") + `/realtime/v1/websocket?apikey=${SB_KEY}&vsn=1.0.0`);
+  ws = sock;
+  const senden = (topic, event, payload) => sock.send(JSON.stringify({ topic, event, payload, ref: String(++wsRef) }));
+  sock.onopen = () => {
+    senden(`realtime:lager-${wsStandort}`, "phx_join", { config: { postgres_changes: [{ event: "*", schema: "public", table: "oellager_signal", filter: `standort_id=eq.${wsStandort}` }] }, access_token: t });
+    clearInterval(wsHerz); wsHerz = setInterval(() => { if (sock.readyState === 1) senden("phoenix", "heartbeat", {}); }, 25000);
+  };
+  sock.onmessage = (m) => {
+    try {
+      const j = JSON.parse(m.data);
+      const v = j.event === "postgres_changes" ? j.payload?.data?.record?.version : null;
+      if (v != null && v !== S.version && wsStandort === S.standort) aktualisieren();
+    } catch (e) { /* */ }
+  };
+  sock.onclose = () => { clearInterval(wsHerz); if (ws === sock) { ws = null; setTimeout(liveVerbinden, 15000); } };
+}
+// Rückfallebene ohne Websocket: alle 20 s die Versionsnummer abfragen (winzige Anfrage)
+setInterval(async () => {
+  if (document.visibilityState !== "visible" || S.ansicht !== "app" || !S.daten || S.speichert || S.offline || !S.sitzung) return;
+  try {
+    const r = await rest("GET", `/rest/v1/oellager_signal?select=version&standort_id=eq.${S.standort}`);
+    if (r?.[0] && r[0].version !== S.version) aktualisieren();
+  } catch (e) { /* */ }
+}, 20000);
 const standortName = () => S.standorte.find((x) => x.id === S.standort)?.name || "";
 const oberflaeche = () => (S.ansicht === "app" && S.daten?.einstellungen?.oberflaeche) || "glas";
 function oberflaecheAnwenden() {
@@ -196,7 +244,7 @@ const OBERFLAECHEN = [["glas", "Glas", "Glaskacheln auf farbigem Hintergrund –
   ["dunkel", "Werkstatt dunkel", "Fast schwarz, große Zahlen, Bernstein als Akzent"],
   ["kompakt", "Klar & kompakt", "Weiß, als Liste – viele Sorten auf einen Blick"],
   ["kennzahlen", "Übersicht mit Kennzahlen", "Kennzahlen-Karte oben, Kacheln zu zweit"]];
-const darfAendern = () => !S.offline && (S.ich?.rolle === "admin" || S.aenderbar.has(S.standort));
+const darfAendern = () => S.ich?.rolle === "admin" || S.aenderbar.has(S.standort);
 const istEntwickler = () => S.ich?.rolle === "admin" && S.ich?.freigegeben;
 const wartendeAnzahl = () => (istEntwickler() ? S.nutzer.filter((n) => !n.freigegeben).length : 0);
 
@@ -224,11 +272,20 @@ async function laden() {
   }
   S.basis = JSON.parse(JSON.stringify(S.daten));
   S.ungespeichert = false; S.fehler = "";
+  // Offline gemachte Änderungen wieder aufnehmen und – sobald Netz da ist – zusammengeführt speichern
+  const offen = cacheLesen("oel_offen_" + S.standort);
+  if (offen && offen.daten) {
+    S.daten = offen.daten; S.basis = offen.basis || S.basis; S.version = offen.version ?? S.version; S.ungespeichert = true;
+    if (!S.offline) { clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 300); }
+  }
 }
+const offenMerken = () => cacheSchreiben("oel_offen_" + S.standort, { basis: S.basis, daten: S.daten, version: S.version });
+const offenLoeschen = () => { try { localStorage.removeItem("oel_offen_" + S.standort); } catch (e) { /* */ } };
 
 let speicherTimer = null;
 function geaendert() {
   S.ungespeichert = true;
+  offenMerken();
   clearTimeout(speicherTimer);
   speicherTimer = setTimeout(speichern, 700);
   zeichnen();
@@ -250,7 +307,9 @@ async function speichern() {
         S.version = v; S.basis = stand; S.geraet = "Web-App"; S.fehler = ""; S.protokollFuer = null;
         // Während des Speicherns weiter getippt? Dann gleich nochmal
         S.ungespeichert = !Zusammenfuehren.gleich(stand, S.daten);
-        if (S.ungespeichert) { clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 700); }
+        if (S.ungespeichert) { offenMerken(); clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 700); }
+        else offenLoeschen();
+        if (S.offline) { S.offline = false; toast("Offline-Änderungen gespeichert"); }
         break;
       }
       const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version&standort_id=eq.${S.standort}`);
@@ -261,7 +320,8 @@ async function speichern() {
       if (runde === 3) S.fehler = "Zu viele gleichzeitige Änderungen – bitte erneut speichern";
     }
   } catch (e) {
-    S.fehler = e.message;
+    if (e.offline) { S.fehler = ""; S.offline = S.offline || true; offenMerken(); }
+    else S.fehler = e.message;
   }
   S.speichert = false; zeichnen();
 }
@@ -294,7 +354,7 @@ function preisMerken(sorteId, quelle, preisGebinde, gebindeL) {
 
 // ---------- Oberfläche ----------
 function kopfZeichnen() {
-  const st = S.ansicht !== "app" ? "" : S.speichert ? "speichert …" : S.ungespeichert ? "nicht gespeichert" :
+  const st = S.ansicht !== "app" ? "" : S.speichert ? "speichert …" : S.offline && S.ungespeichert ? "offline · wird später gespeichert" : S.ungespeichert ? "nicht gespeichert" :
     S.fehler ? "Fehler: " + S.fehler : S.daten ? ["gespeichert", S.ich?.name || S.sitzung?.email].filter(Boolean).join(" · ") : "";
   $("#kopf").innerHTML = `
     <h1>${S.ansicht === "app" && standortName() ? "Lager " + esc(standortName()) : "Öllager"}<span class="unter status ${S.fehler ? "fehler" : ""}">${esc(st)}</span></h1>
@@ -304,6 +364,10 @@ function kopfZeichnen() {
       ${S.menueOffen ? `<div class="menue glas" role="menu">
         <button role="menuitem" data-a="standort-wechseln">⌖ Standort wechseln</button>
         <button role="menuitem" data-a="neu-laden">⟳ Neu laden</button>
+        <button role="menuitem" data-a="lagerplan">▦ Lagerplan · Wo steht was?</button>
+        <button role="menuitem" data-a="doppelte">⧉ Doppelte Sorten finden</button>
+        <button role="menuitem" data-a="jahresbericht">▤ Jahresbericht (PDF)</button>
+        ${istEntwickler() && "PushManager" in window ? `<button role="menuitem" data-a="push">🔔 Meldung bei neuen Nutzern</button>` : ""}
         <button role="menuitem" data-a="thema">◐ Hell / Dunkel</button>
         <button role="menuitem" data-a="zwei-faktor">🔐 Zwei-Faktor-Anmeldung</button>
         ${istEntwickler() ? `<button role="menuitem" data-a="entwickler">⚙ Entwicklermenü${wartendeAnzahl() ? ` <span class="zaehler">${wartendeAnzahl()}</span>` : ""}</button>` : ""}
@@ -333,8 +397,9 @@ function zeichnen() {
       .map(([k, v]) => `<button aria-pressed="${S.kat === k}" data-a="kat" data-v="${k}">${v.titel}</button>`).join("")}</div>`;
   }
   if (S.preisModus === "kunde") html += `<div class="banner">🏷️ Kundenpreise: Einkauf + ${fmtZahl(aufschlag())} % Aufschlag + ${S.mwst} % MwSt.</div>`;
-  if (typeof S.offline === "string") html += `<div class="banner">📴 Offline – Stand vom ${new Date(S.offline).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, nur lesen. <button class="knopf klein" data-a="neu-laden">Erneut verbinden</button></div>`;
-  else if (S.offline) html += `<div class="banner">📴 Offline – nur lesen</div>`;
+  const offlineText = darfAendern() ? "Änderungen werden gespeichert, sobald wieder Netz da ist" : "nur lesen";
+  if (typeof S.offline === "string") html += `<div class="banner">📴 Offline – Stand vom ${new Date(S.offline).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, ${offlineText}. <button class="knopf klein" data-a="neu-laden">Erneut verbinden</button></div>`;
+  else if (S.offline) html += `<div class="banner">📴 Offline – ${offlineText}</div>`;
   else if (!darfAendern()) html += `<div class="banner">🔒 Nur Leserechte an diesem Standort</div>`;
   html += ({ lager: lagerHtml, sorten: sortenHtml, preise: preiseHtml, auswertung: auswertungHtml, stamm: stammHtml })[S.tab]();
   app.innerHTML = html;
@@ -761,6 +826,7 @@ function sorteImLagerHtml(s, farbe) {
       <div class="preis">${sch != null ? "Ø " + fmtP(sch) + " / L" : ""}</div>
       <button class="knopf klein" data-a="sorte-bearbeiten" data-v="${s.id}">Ändern</button></div>
     ${fr.length ? `<div style="margin:6px 0 0 42px">${fr.map((f) => `<span class="pille">${esc(f.bezeichnung)}</span>`).join("")}</div>` : ""}
+    ${kommentareVon(s.id).length ? `<div class="kommentar" data-a="sorte-bearbeiten" data-v="${s.id}" role="button" tabindex="0">💬 ${kommentareVon(s.id).length > 1 ? kommentareVon(s.id).length + " Kommentare · " : ""}${esc(kommentareVon(s.id)[0].text)}</div>` : ""}
     <div style="margin-left:42px">
       ${fs.map((f) => `<div class="fass" data-a="fass-bearbeiten" data-v="${f.id}" role="button" tabindex="0">
         <div style="flex:1"><b>${esc(f.lagerplatz || "Ohne Lagerplatz")}</b>
@@ -1037,7 +1103,12 @@ function sorteDialog(s) {
     ${neu ? "" : preisentwicklungHtml(s.id)}
     ${neu ? "" : `<div class="feld"><span class="neben">Fotos und Datenblätter</span><div id="blaetter" class="chips"><span class="neben">Wird geladen …</span></div>
       ${darfAendern() ? `<label class="knopf klein" style="justify-self:start;cursor:pointer">+ Foto oder PDF<input type="file" id="blatt-datei" accept="image/*,application/pdf" capture="environment" hidden></label>` : ""}</div>`}
-    <label class="feld"><span>Notiz</span><textarea id="d-notiz" rows="2">${esc(s.notiz)}</textarea></label>`,
+    <details class="feld"><summary class="neben" style="cursor:pointer">Aus der Freigaben-Bibliothek wählen …</summary>
+      <input id="d-bib-filter" placeholder="Hersteller oder Norm filtern, z. B. VW, MB, ACEA" style="margin:8px 0">
+      <div class="chips" id="d-bib">${bibliothekHtml(s.kategorie || "OEL", gewaehlt, "")}</div></details>
+    <label class="feld"><span>Notiz</span><textarea id="d-notiz" rows="2">${esc(s.notiz)}</textarea></label>
+    ${neu ? "" : `<div class="feld"><span class="neben">Kommentare</span><div id="kommentare">${kommentareHtml(s.id)}</div></div>`}
+    ${neu || !kopierZiele().length ? "" : `<div class="reihe"><button class="knopf klein" data-a="sorte-kopieren" data-v="${s.id}">An anderen Standort kopieren …</button></div>`}`,
     `${neu ? "" : `<button class="knopf gefahr" data-a="sorte-loeschen" data-v="${s.id}">Löschen</button>`}
      <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="sorte-speichern" data-v="${neu ? 0 : s.id}">Speichern</button>`);
   if (!neu) {
@@ -1057,6 +1128,189 @@ function sorteDialog(s) {
     const b = e.target.closest(".chip"); if (!b) return;
     b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
   });
+  const katS = s.kategorie || "OEL";
+  const gewaehltJetzt = () => new Set([...document.querySelectorAll('#d-fr .chip[aria-pressed="true"]')].map((b) => Number(b.dataset.fid)));
+  $("#d-bib-filter").addEventListener("input", (e) => { $("#d-bib").innerHTML = bibliothekHtml(katS, gewaehltJetzt(), e.target.value); });
+  $("#d-bib").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    const f = freigabeAnlegen(b.dataset.bez, katS);
+    let chip = document.querySelector(`#d-fr .chip[data-fid="${f.id}"]`);
+    if (!chip) {
+      $("#d-fr").querySelector("span.neben")?.remove();
+      $("#d-fr").insertAdjacentHTML("beforeend", `<button type="button" class="chip" data-fid="${f.id}" aria-pressed="true">${esc(f.bezeichnung)}</button>`);
+    } else chip.setAttribute("aria-pressed", "true");
+    b.remove();
+  });
+}
+
+// ---------- Freigaben-Bibliothek (gleiche Liste wie in der App) ----------
+const normiert = (t) => String(t || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+function bibliothekHtml(kat, gewaehlt, filter) {
+  const schon = new Set(S.daten.freigaben.filter((f) => gewaehlt.has(f.id)).map((f) => normiert(f.bezeichnung)));
+  const q = String(filter || "").toLowerCase();
+  const liste = FREIGABEN_BIBLIOTHEK.filter(([h, b, k]) => k === kat && !schon.has(normiert(b)) && (!q || b.toLowerCase().includes(q) || h.toLowerCase().includes(q)));
+  return liste.map(([h, b]) => `<button type="button" class="chip" data-bez="${esc(b)}" title="${esc(h)}">+ ${esc(b)}</button>`).join("") || `<span class="neben">Alles gewählt oder nichts gefunden.</span>`;
+}
+/** Freigabe holen oder (mit Hersteller aus der Bibliothek) anlegen. */
+function freigabeAnlegen(bez, kat) {
+  const n = normiert(bez);
+  let f = S.daten.freigaben.find((x) => normiert(x.bezeichnung) === n);
+  if (f) { if (f.kategorie && f.kategorie !== kat) f.kategorie = ""; return f; }
+  const std = FREIGABEN_BIBLIOTHEK.find(([, b]) => normiert(b) === n);
+  f = { id: naechsteId(S.daten.freigaben), hersteller: std ? std[0] : bez.split(/\s+/)[0], bezeichnung: std ? std[1] : bez, kategorie: kat };
+  S.daten.freigaben.push(f);
+  return f;
+}
+
+// ---------- Kommentare je Sorte ----------
+const kommentareVon = (id) => (S.daten.kommentare || []).filter((k) => k.sorteId === id).sort((a, b) => b.zeit - a.zeit);
+function kommentareHtml(id) {
+  const l = kommentareVon(id);
+  return `${l.map((k) => `<div class="reihe" style="align-items:flex-start"><div style="flex:1">${esc(k.text)}<div class="neben">${esc(k.wer)} · ${new Date(k.zeit).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</div></div>
+      ${darfAendern() ? `<button type="button" class="icon" data-a="kommentar-loeschen" data-v="${k.id}" aria-label="Kommentar löschen">✕</button>` : ""}</div>`).join("") || `<span class="neben">Noch keine Kommentare.</span>`}
+    ${darfAendern() ? `<div class="reihe" style="margin-top:6px"><input id="k-neu" placeholder="z. B. Nur für Kunde Müller, Fass 2 hat Delle" style="flex:1">
+      <button type="button" class="knopf klein" data-a="kommentar-speichern" data-v="${id}">Hinzufügen</button></div>` : ""}`;
+}
+
+// ---------- Sorte an anderen Standort kopieren ----------
+const kopierZiele = () => S.standorte.filter((x) => x.id !== S.standort && (S.ich?.rolle === "admin" || S.aenderbar.has(x.id)));
+async function sorteKopieren(so, ziel) {
+  for (let runde = 0; runde < 3; runde++) {
+    const rows = await rest("GET", `/rest/v1/oellager_bestand?select=daten,version&standort_id=eq.${ziel}`);
+    const d = rows[0]?.daten || leererStand();
+    for (const k of ["lieferanten", "freigaben", "sorten", "faesser", "angebote", "historie"]) d[k] = d[k] || [];
+    if (d.sorten.some((x) => normiert(x.marke) === normiert(so.marke) && normiert(x.name) === normiert(so.name) && normiert(x.viskositaet) === normiert(so.viskositaet))) {
+      return "Diese Sorte gibt es am Ziel-Standort schon";
+    }
+    let lid = null;
+    const l = lieferant(so.lieferantId);
+    if (l) {
+      lid = d.lieferanten.find((x) => normiert(x.name) === normiert(l.name))?.id ?? null;
+      if (lid == null) { lid = naechsteId(d.lieferanten); d.lieferanten.push({ ...l, id: lid }); }
+    }
+    const frIds = (so.freigabeIds || []).map(freigabe).filter(Boolean).map((f) => {
+      const da = d.freigaben.find((x) => normiert(x.bezeichnung) === normiert(f.bezeichnung));
+      if (da) return da.id;
+      const id = naechsteId(d.freigaben); d.freigaben.push({ ...f, id }); return id;
+    });
+    d.sorten.push({ ...so, id: naechsteId(d.sorten), lieferantId: lid, freigabeIds: frIds, aktiv: true, ersetztDurchId: null, nachbestellen: false });
+    const v = await rest("POST", "/rest/v1/rpc/oellager_speichern", { p_standort: ziel, p_daten: d, p_geraet: "Web-App", p_version: rows[0]?.version ?? null });
+    if (v != null) return `„${anzeigename(so)}“ nach ${S.standorte.find((x) => x.id === ziel)?.name} kopiert (ohne Fässer)`;
+  }
+  return "Gerade ändert jemand am Ziel-Standort – bitte gleich noch einmal";
+}
+
+// ---------- Doppelte Sorten ----------
+function doppelteSorten() {
+  const gruppen = [], gesehen = new Set();
+  const nach = (f) => { const m = new Map(); for (const so of S.daten.sorten) { const k = f(so); if (!k) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(so); } return [...m.values()].filter((g) => g.length > 1); };
+  const lauf = [...nach((so) => normiert((so.kategorie || "OEL") + so.viskositaet) + "|" + normiert(`${so.marke} ${so.name}`).replace(normiert(so.viskositaet), "")),
+    ...nach((so) => (String(so.artikelnummer || "").length >= 4 ? normiert(so.artikelnummer) : null)),
+    ...nach((so) => (String(so.ean || "").length >= 8 ? so.ean : null))];
+  for (const g of lauf) { const n = g.filter((x) => !gesehen.has(x.id)); if (n.length > 1) { gruppen.push(n); n.forEach((x) => gesehen.add(x.id)); } }
+  return gruppen;
+}
+function doppelteDialog() {
+  const g = doppelteSorten();
+  dialog("Doppelte Sorten", g.length ? `<p class="neben">Bei der Sorte, die bleiben soll, auf „Behalten“ tippen. Fässer, Preise, Verlauf, Kommentare und Freigaben der anderen wandern dorthin.</p>
+    ${g.map((gr) => `<div class="glas" style="padding:10px;margin-bottom:8px">${gr.map((so) => `<div class="reihe"><div style="flex:1"><b>${esc(anzeigename(so))}</b>
+      <div class="neben">${esc([so.viskositaet, lieferant(so.lieferantId)?.name, so.artikelnummer && "Art. " + so.artikelnummer, faesserVon(so.id).length + " Fässer"].filter(Boolean).join(" · "))}</div></div>
+      ${darfAendern() ? `<button class="knopf klein" data-a="doppelt-behalten" data-v="${so.id}" data-weg="${gr.find((x) => x.id !== so.id).id}">Behalten</button>` : ""}</div>`).join("")}</div>`).join("")}`
+    : `<p>Keine doppelten Sorten gefunden.</p>`, `<button class="knopf" data-a="schliessen">Schließen</button>`);
+}
+function sortenZusammenfuehren(behalten, weg) {
+  const d = S.daten;
+  for (const k of ["faesser", "historie", "kommentare"]) for (const o of d[k] || []) if (o.sorteId === weg) o.sorteId = behalten;
+  const quellen = new Set(d.angebote.filter((a) => a.sorteId === behalten).map((a) => a.quelle));
+  d.angebote = d.angebote.filter((a) => !(a.sorteId === weg && quellen.has(a.quelle))).map((a) => (a.sorteId === weg ? { ...a, sorteId: behalten } : a));
+  const neu = d.sorten.find((x) => x.id === behalten), alt = d.sorten.find((x) => x.id === weg);
+  neu.freigabeIds = [...new Set([...(neu.freigabeIds || []), ...(alt.freigabeIds || [])])];
+  if (!neu.artikelnummer) neu.artikelnummer = alt.artikelnummer;
+  if (!neu.ean) neu.ean = alt.ean;
+  d.sorten = d.sorten.filter((x) => x.id !== weg).map((x) => (x.ersetztDurchId === weg ? { ...x, ersetztDurchId: behalten } : x));
+}
+
+// ---------- Lagerplan ----------
+const plan = () => S.daten.lagerplan?.regale || [];
+const plaetze = (r) => Array.from({ length: r.plaetze }, (_, i) => r.name + (i + 1));
+const fassName = (f) => { const so = S.daten.sorten.find((x) => x.id === f.sorteId); return so ? `${so.viskositaet} ${anzeigename(so)}`.trim() : "?"; };
+function lagerplanDialog(suche = "") {
+  const bestand = S.daten.faesser.filter((f) => !f.leerAm);
+  const nachPlatz = new Map();
+  for (const f of bestand) { const k = String(f.lagerplatz || "").trim().toUpperCase(); if (!nachPlatz.has(k)) nachPlatz.set(k, []); nachPlatz.get(k).push(f); }
+  const treffer = suche ? bestand.filter((f) => fassName(f).toLowerCase().includes(suche.toLowerCase())) : [];
+  const markiert = new Set(treffer.map((f) => String(f.lagerplatz || "").trim().toUpperCase()));
+  const alle = new Set(plan().flatMap(plaetze).map((p) => p.toUpperCase()));
+  const ohne = bestand.filter((f) => !alle.has(String(f.lagerplatz || "").trim().toUpperCase()));
+  dialog("Lagerplan", `
+    <label class="feld"><span>Wo steht …?</span><input id="lp-suche" value="${esc(suche)}" placeholder="z. B. 5W-30 oder Castrol"></label>
+    <div id="lp-treffer">${suche ? (treffer.map((f) => `<div><b>${esc(fassName(f))}</b> → ${esc(f.lagerplatz || "kein Platz eingetragen")}</div>`).join("") || `<span class="neben">Nichts im Bestand gefunden.</span>`) : ""}</div>
+    ${plan().length ? "" : `<p class="neben">Noch kein Lagerplan. Regale unten eintragen, z. B. „A:6, B:4“ – Fässer mit Lagerplatz „A1“ … „A6“ erscheinen dann dort.</p>`}
+    ${plan().map((r) => `<div style="margin-top:10px"><b>Regal ${esc(r.name)}</b><div class="lp-raster">${plaetze(r).map((p) => {
+      const hier = nachPlatz.get(p.toUpperCase()) || [];
+      return `<button type="button" class="lp-platz ${markiert.has(p.toUpperCase()) ? "treffer" : hier.length ? "belegt" : ""}" data-a="lp-platz" data-v="${esc(p)}"><b>${esc(p)}</b>
+        ${hier.slice(0, 3).map((f) => `<span>${esc(fassName(f))}</span>`).join("") || `<span class="neben">frei</span>`}${hier.length > 3 ? `<span>+${hier.length - 3}</span>` : ""}</button>`;
+    }).join("")}</div></div>`).join("")}
+    ${plan().length && ohne.length ? `<p style="margin-top:12px"><b>Ohne Platz im Plan (${ohne.length})</b></p>${ohne.map((f) => `<div class="neben">${esc(fassName(f))}${f.lagerplatz ? " · " + esc(f.lagerplatz) : ""}</div>`).join("")}` : ""}
+    ${darfAendern() ? feld("lp-regale", "Regale (Name:Plätze, durch Komma getrennt)", plan().map((r) => `${r.name}:${r.plaetze}`).join(", "), "text", `placeholder="A:6, B:4"`) : ""}`,
+    `<button class="knopf" data-a="schliessen">Schließen</button>${darfAendern() ? `<button class="knopf haupt" data-a="lp-regale-speichern">Regale speichern</button>` : ""}`);
+  const eingabe = $("#lp-suche");
+  eingabe.addEventListener("change", () => lagerplanDialog(eingabe.value.trim()));
+  eingabe.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lagerplanDialog(eingabe.value.trim()); } });
+}
+function platzDialog(p) {
+  const bestand = S.daten.faesser.filter((f) => !f.leerAm);
+  const hier = bestand.filter((f) => String(f.lagerplatz || "").trim().toUpperCase() === p.toUpperCase());
+  const optionen = plan().flatMap(plaetze).map((x) => `<option ${x === p ? "selected" : ""}>${esc(x)}</option>`).join("");
+  dialog(`Platz ${esc(p)}`, `${hier.map((f) => `<div class="reihe"><span style="flex:1">${esc(fassName(f))}</span>
+      ${darfAendern() ? `<select data-umstellen="${f.id}">${optionen}</select>` : ""}</div>`).join("") || `<p class="neben">Hier steht nichts.</p>`}
+    ${darfAendern() ? `<label class="feld"><span>Fass hierher stellen</span><select id="lp-hierher"><option value="">– Fass wählen –</option>
+      ${bestand.filter((f) => !hier.includes(f)).map((f) => `<option value="${f.id}">${esc(fassName(f))}${f.lagerplatz ? " (" + esc(f.lagerplatz) + ")" : ""}</option>`).join("")}</select></label>` : ""}`,
+    `<button class="knopf" data-a="lagerplan">Zurück zum Plan</button>`);
+  dlg.querySelectorAll("select[data-umstellen]").forEach((sel) => sel.addEventListener("change", () => {
+    const f = S.daten.faesser.find((x) => x.id === Number(sel.dataset.umstellen)); if (!f) return;
+    f.lagerplatz = sel.value; geaendert(); toast(`${fassName(f)} → ${sel.value}`); platzDialog(p);
+  }));
+  $("#lp-hierher")?.addEventListener("change", (e) => {
+    const f = S.daten.faesser.find((x) => x.id === Number(e.target.value)); if (!f) return;
+    f.lagerplatz = p; geaendert(); toast(`${fassName(f)} → ${p}`); platzDialog(p);
+  });
+}
+
+// ---------- Jahresbericht ----------
+function jahresberichtDrucken(jahr) {
+  const alle = S.daten.faesser;
+  const jahrVon = (t) => datumAus(t)?.getFullYear();
+  const gekauft = alle.filter((f) => jahrVon(f.lieferdatum) === jahr), leer = alle.filter((f) => jahrVon(f.leerAm) === jahr);
+  const ende = new Date(jahr, 11, 31, 23, 59);
+  const bestand = alle.filter((f) => { const g = datumAus(f.lieferdatum), l = datumAus(f.leerAm); return (!g || g <= ende) && (!l || l > ende); });
+  const sum = (l, k) => l.reduce((s, f) => s + (Number(f[k]) || 0), 0);
+  const ids = [...new Set([...gekauft, ...leer].map((f) => f.sorteId))];
+  const zeilen = ids.map((id) => S.daten.sorten.find((x) => x.id === id)).filter(Boolean)
+    .sort((a, b) => String(a.viskositaet).localeCompare(String(b.viskositaet)) || anzeigename(a).localeCompare(anzeigename(b)))
+    .map((so) => { const k = gekauft.filter((f) => f.sorteId === so.id), v = leer.filter((f) => f.sorteId === so.id); return { so, k, v }; });
+  const monate = MONATE.map((_, m) => sum(leer.filter((f) => datumAus(f.leerAm)?.getMonth() === m), "gebindeL"));
+  const max = Math.max(1, ...monate);
+  const w = window.open("", "_blank");
+  if (!w) { toast("Bitte Pop-ups für diese Seite erlauben"); return; }
+  w.document.write(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>${esc(dateiName("Jahresbericht-" + jahr, "pdf"))}</title>
+    <style>body{font:11px system-ui,Arial,sans-serif;margin:24px}h1{font-size:20px;margin:0}p{color:#666;margin:2px 0 14px}table{border-collapse:collapse;width:100%}
+    th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}th{font-size:10px;text-transform:uppercase;color:#444}.r{text-align:right}
+    .kacheln{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.k{background:#EFF4F5;border-radius:8px;padding:8px 10px}.k b{display:block;font-size:15px}
+    .bal{display:flex;align-items:flex-end;gap:6px;height:120px;margin-top:8px;border-bottom:1px solid #ccc}.bal div{flex:1;background:#2E7D8A;position:relative}.bal span{position:absolute;top:-14px;width:100%;text-align:center;font-size:9px;color:#666}
+    .mon{display:flex;gap:6px}.mon span{flex:1;text-align:center;color:#666;font-size:9px}</style></head><body>
+    <h1>Jahresbericht ${jahr}${standortName() ? " · Lager " + esc(standortName()) : ""}</h1><p>Erstellt ${new Date().toLocaleDateString("de-DE")} · Preise netto</p>
+    <div class="kacheln"><div class="k">Eingekauft<b>${gekauft.length} Fässer · ${fmtZahl(sum(gekauft, "gebindeL"))} L</b></div><div class="k">Einkaufswert<b>${fmtEur(sum(gekauft, "preisFass"))}</b></div><div class="k">&nbsp;<b></b></div>
+      <div class="k">Verbraucht<b>${leer.length} Fässer · ${fmtZahl(sum(leer, "gebindeL"))} L</b></div><div class="k">Verbrauchswert<b>${fmtEur(sum(leer, "preisFass"))}</b></div>
+      <div class="k">Bestand 31.12.<b>${bestand.length} Fässer · ${fmtEur(sum(bestand, "preisFass"))}</b></div></div>
+    <table><thead><tr><th>Visk.</th><th>Sorte</th><th class="r">Gekauft</th><th class="r">Liter</th><th class="r">Einkauf</th><th class="r">Verbraucht</th><th class="r">Liter</th><th class="r">Wert</th></tr></thead><tbody>
+    ${zeilen.map(({ so, k, v }) => `<tr><td>${esc(so.viskositaet)}</td><td>${esc(anzeigename(so))}</td><td class="r">${k.length}</td><td class="r">${fmtZahl(sum(k, "gebindeL"))}</td><td class="r">${fmtEur(sum(k, "preisFass"))}</td>
+      <td class="r">${v.length}</td><td class="r">${fmtZahl(sum(v, "gebindeL"))}</td><td class="r">${fmtEur(sum(v, "preisFass"))}</td></tr>`).join("") || `<tr><td colspan="8">Für ${jahr} sind keine Lieferungen oder leeren Fässer erfasst.</td></tr>`}</tbody></table>
+    <p style="margin-top:18px;color:#222"><b>Verbrauch je Monat (Liter)</b></p>
+    <div class="bal">${monate.map((v) => `<div style="height:${(v / max) * 100}%">${v ? `<span>${fmtZahl(v)}</span>` : ""}</div>`).join("")}</div>
+    <div class="mon">${MONATE.map((m) => `<span>${m}</span>`).join("")}</div></body></html>`);
+  w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch (e) { /* Fenster zu */ } }, 400);
 }
 /** Einkaufspreise je Liter über die Lieferungen als kleines Liniendiagramm. */
 function preisentwicklungHtml(sorteId) {
@@ -1286,6 +1540,51 @@ document.addEventListener("click", async (e) => {
       break;
     }
     case "fahrzeug": fahrzeugDialog(); break;
+    case "lagerplan": lagerplanDialog(); break;
+    case "lp-platz": platzDialog(v); break;
+    case "lp-regale-speichern": {
+      const regale = wert("lp-regale").split(/[,;]+/).map((t) => t.trim()).filter(Boolean).map((t) => {
+        const [n, p] = t.split(/[:\s]+/); return { name: String(n || "").toUpperCase().slice(0, 6), plaetze: Math.min(60, Math.max(1, Number(p) || 1)) };
+      }).filter((r) => r.name).filter((r, i, a) => a.findIndex((x) => x.name === r.name) === i);
+      S.daten.lagerplan = { regale }; geaendert(); toast("Lagerplan gespeichert"); lagerplanDialog(); break;
+    }
+    case "doppelte": doppelteDialog(); break;
+    case "doppelt-behalten": {
+      const weg = Number(el.dataset.weg), b = S.daten.sorten.find((x) => x.id === nr), w = S.daten.sorten.find((x) => x.id === weg);
+      if (b && w && confirm(`„${anzeigename(w)}“ in „${anzeigename(b)}“ übernehmen und danach löschen?`)) { sortenZusammenfuehren(nr, weg); geaendert(); toast("Sorten zusammengeführt"); doppelteDialog(); }
+      break;
+    }
+    case "jahresbericht": {
+      const jahre = [...new Set([new Date().getFullYear(), ...S.daten.faesser.flatMap((f) => [datumAus(f.lieferdatum)?.getFullYear(), datumAus(f.leerAm)?.getFullYear()]).filter(Boolean)])].sort((a, b) => b - a);
+      dialog("Jahresbericht", `<p>Einkauf, Verbrauch je Sorte und Monat sowie der Bestand zum Jahresende – zum Drucken oder als PDF speichern.</p>`,
+        `<button class="knopf" data-a="schliessen">Abbrechen</button>${jahre.slice(0, 3).map((j) => `<button class="knopf haupt" data-a="jahresbericht-drucken" data-v="${j}">${j}</button>`).join("")}`);
+      break;
+    }
+    case "jahresbericht-drucken": dlg.close(); jahresberichtDrucken(nr); break;
+    case "kommentar-speichern": {
+      const text = wert("k-neu"); if (!text) return;
+      S.daten.kommentare = S.daten.kommentare || [];
+      S.daten.kommentare.push({ id: naechsteId(S.daten.kommentare), sorteId: nr, text, wer: S.ich?.name || S.sitzung?.email || "Web-App", zeit: Date.now() });
+      geaendert(); $("#kommentare").innerHTML = kommentareHtml(nr); break;
+    }
+    case "kommentar-loeschen": {
+      const k = (S.daten.kommentare || []).find((x) => x.id === nr); if (!k) return;
+      S.daten.kommentare = S.daten.kommentare.filter((x) => x.id !== nr); geaendert(); $("#kommentare").innerHTML = kommentareHtml(k.sorteId); break;
+    }
+    case "sorte-kopieren": {
+      const so = S.daten.sorten.find((x) => x.id === nr); if (!so) return;
+      dialog("An Standort kopieren", `<p>„${esc(anzeigename(so))}“ wird mit Lieferant und Freigaben am Ziel angelegt. Fässer und Preise bleiben hier.</p>
+        <label class="feld"><span>Ziel-Standort</span><select id="kopie-ziel">${kopierZiele().map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label>`,
+        `<button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="sorte-kopieren-ok" data-v="${nr}">Kopieren</button>`);
+      break;
+    }
+    case "sorte-kopieren-ok": {
+      const so = S.daten.sorten.find((x) => x.id === nr), ziel = Number(wert("kopie-ziel"));
+      dlg.close();
+      try { toast(await sorteKopieren(so, ziel)); } catch (err) { toast(err.message); }
+      break;
+    }
+    case "push": pushEinrichten(); break;
     case "ob-setzen":
       S.daten.einstellungen = { ...(S.daten.einstellungen || {}), oberflaeche: v }; geaendert(); verwaltungDialog();
       toast("Oberfläche „" + OBERFLAECHEN.find((x) => x[0] === v)[1] + "“ für alle am Standort gespeichert"); break;
@@ -1548,6 +1847,7 @@ document.addEventListener("visibilitychange", async () => {
 let breitVorher = istBreit();
 window.addEventListener("resize", () => { if (istBreit() !== breitVorher) { breitVorher = istBreit(); if (S.ansicht === "app" && !dlg.open) zeichnen(); } });
 window.addEventListener("online", async () => {
+  if (S.ansicht === "app" && S.ungespeichert) { S.offline = false; await speichern(); }
   if (S.offline && S.ansicht === "app") { try { await verwaltungLaden(); await laden(); zeichnen(); toast("Wieder online"); } catch (e) { /* noch nicht */ } }
 });
 let letzteBedienung = Date.now();
@@ -1559,7 +1859,7 @@ setInterval(async () => {
     S.meldung = "Aus Sicherheitsgründen abgemeldet (30 Minuten ohne Bedienung)."; dlg.open && dlg.close(); zeichnen();
   }
 }, 60_000);
-window.addEventListener("beforeunload", (e) => { if (S.ungespeichert) { e.preventDefault(); e.returnValue = ""; } });
+window.addEventListener("beforeunload", (e) => { if (S.ungespeichert && !S.offline) { e.preventDefault(); e.returnValue = ""; } });
 
 // ---------- Fehlerberichte an den Entwickler ----------
 let gemeldet = 0;
@@ -1611,3 +1911,28 @@ window.addEventListener("unhandledrejection", (e) => { if (!e.reason?.offline) f
   zeichnen();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
+
+// Gängige Herstellerfreigaben [Hersteller, Bezeichnung, Kategorie] – gleiche Liste wie in der App (data/Kategorie.kt)
+const FREIGABEN_BIBLIOTHEK = [["VW", "VW 502 00", "OEL"], ["VW", "VW 505 00", "OEL"], ["VW", "VW 504 00", "OEL"], ["VW", "VW 507 00", "OEL"], ["VW", "VW 508 00", "OEL"], ["VW", "VW 509 00", "OEL"], ["Mercedes-Benz", "MB 229.3", "OEL"], ["Mercedes-Benz", "MB 229.5", "OEL"], ["Mercedes-Benz", "MB 229.51", "OEL"], ["Mercedes-Benz", "MB 229.52", "OEL"], ["Mercedes-Benz", "MB 229.71", "OEL"], ["Mercedes-Benz", "MB 228.51", "OEL"], ["BMW", "BMW Longlife-01", "OEL"], ["BMW", "BMW Longlife-04", "OEL"], ["BMW", "BMW Longlife-17 FE+", "OEL"], ["Porsche", "Porsche A40", "OEL"], ["Porsche", "Porsche C30", "OEL"], ["Ford", "Ford WSS-M2C913-D", "OEL"], ["Ford", "Ford WSS-M2C948-B", "OEL"], ["Opel", "GM dexos2", "OEL"], ["Renault", "Renault RN0700", "OEL"], ["Renault", "Renault RN0710", "OEL"], ["Renault", "Renault RN17", "OEL"], ["Stellantis", "PSA B71 2290", "OEL"], ["Stellantis", "PSA B71 2312", "OEL"], ["Volvo", "Volvo VCC RBS0-2AE", "OEL"], ["MAN", "MAN M 3477", "OEL"], ["VW", "VW 501 01", "OEL"], ["VW", "VW 503 00", "OEL"], ["VW", "VW 506 01", "OEL"], ["VW", "VW 511 00", "OEL"], ["VW", "VW 512 00", "OEL"], ["Mercedes-Benz", "MB 229.31", "OEL"], ["Mercedes-Benz", "MB 229.61", "OEL"], ["Mercedes-Benz", "MB 229.72", "OEL"], ["Mercedes-Benz", "MB 229.81", "OEL"], ["Mercedes-Benz", "MB 229.91", "OEL"], ["Mercedes-Benz", "MB 228.31", "OEL"], ["BMW", "BMW Longlife-12 FE", "OEL"], ["BMW", "BMW Longlife-14 FE+", "OEL"], ["BMW", "BMW Longlife-19 FE", "OEL"], ["Porsche", "Porsche C40", "OEL"], ["Ford", "Ford WSS-M2C950-A", "OEL"], ["Ford", "Ford WSS-M2C947-B1", "OEL"], ["Ford", "Ford WSS-M2C960-A1", "OEL"], ["Opel", "GM dexos1 Gen3", "OEL"], ["Opel", "GM dexosD", "OEL"], ["Fiat", "Fiat 9.55535-S1", "OEL"], ["Fiat", "Fiat 9.55535-S2", "OEL"], ["Fiat", "Fiat 9.55535-S3", "OEL"], ["Fiat", "Fiat 9.55535-GS1", "OEL"], ["Renault", "Renault RN0720", "OEL"], ["Renault", "Renault RN17 FE", "OEL"], ["Stellantis", "PSA B71 2297", "OEL"], ["Stellantis", "PSA B71 2302", "OEL"], ["Stellantis", "Stellantis FPW9.55535/03", "OEL"], ["Jaguar Land Rover", "JLR STJLR.03.5005", "OEL"], ["Jaguar Land Rover", "JLR STJLR.51.5122", "OEL"], ["Volvo", "Volvo VCC RBS0-2BE", "OEL"], ["Honda", "Honda HTO-06", "OEL"], ["MAN", "MAN M 3677", "OEL"], ["Scania", "Scania LDF-4", "OEL"], ["Volvo", "Volvo VDS-4.5", "OEL"], ["ACEA", "ACEA A3/B4", "OEL"], ["ACEA", "ACEA A5/B5", "OEL"], ["ACEA", "ACEA C2", "OEL"], ["ACEA", "ACEA C3", "OEL"], ["ACEA", "ACEA C5", "OEL"], ["ACEA", "ACEA C6", "OEL"], ["ACEA", "ACEA E4", "OEL"], ["ACEA", "ACEA E6", "OEL"], ["API", "API SP", "OEL"], ["API", "API SN", "OEL"], ["ILSAC", "ILSAC GF-6A", "OEL"], ["VW", "VW TL 774-C", "KUEHL"], ["VW", "VW TL 774-D/F", "KUEHL"], ["VW", "VW TL 774-G", "KUEHL"], ["VW", "VW TL 774-J", "KUEHL"], ["VW", "VW TL 774-L", "KUEHL"], ["Mercedes-Benz", "MB 325.0", "KUEHL"], ["Mercedes-Benz", "MB 325.3", "KUEHL"], ["Mercedes-Benz", "MB 325.5", "KUEHL"], ["Mercedes-Benz", "MB 325.6", "KUEHL"], ["BMW", "BMW N 600 69.0", "KUEHL"], ["Opel", "GM 6277M", "KUEHL"], ["Ford", "Ford WSS-M97B44-D", "KUEHL"], ["Stellantis", "PSA B71 5110", "KUEHL"], ["Renault", "Renault Type D", "KUEHL"], ["MAN", "MAN 324 Typ SNF", "KUEHL"], ["VW", "VW TL 774-B", "KUEHL"], ["Mercedes-Benz", "MB 326.0", "KUEHL"], ["BMW", "BMW GS 94000", "KUEHL"], ["Ford", "Ford WSS-M97B57-A2", "KUEHL"], ["Fiat", "Fiat 9.55523", "KUEHL"], ["Volvo", "Volvo 128 6083/002", "KUEHL"], ["Porsche", "Porsche 000 043 305 33", "KUEHL"], ["Scania", "Scania TB 1451", "KUEHL"], ["DAF", "DAF 74002", "KUEHL"], ["Cummins", "Cummins CES 14603", "KUEHL"], ["MTU", "MTU MTL 5048", "KUEHL"], ["ASTM", "ASTM D3306", "KUEHL"]];
+
+// ---------- Push-Meldungen (auch iPhone, wenn die Web-App auf dem Home-Bildschirm liegt) ----------
+const VAPID_OEFFENTLICH = "BESqExKxbIoGe-bPy8JweAl-dbW6fhpcYnjeoJDVjB_IGbFXDno6qDQdQtDKSSPrjX_9uJrnhk4BD0FSdb7q0n8";
+async function pushEinrichten() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) { toast("Dieser Browser kann keine Meldungen empfangen"); return; }
+    if (/iPhone|iPad/.test(navigator.userAgent) && !window.matchMedia("(display-mode: standalone)").matches) {
+      dialog("Meldungen auf dem iPhone", `<p>Apple erlaubt Meldungen nur für Web-Apps auf dem Home-Bildschirm:</p>
+        <p>1. In Safari unten auf <b>Teilen</b> tippen<br>2. <b>Zum Home-Bildschirm</b> wählen<br>3. Die Web-App von dort öffnen und hier erneut tippen.</p>`,
+        `<button class="knopf haupt" data-a="schliessen">Verstanden</button>`);
+      return;
+    }
+    if (await Notification.requestPermission() !== "granted") { toast("Meldungen wurden nicht erlaubt"); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const key = Uint8Array.from(atob(VAPID_OEFFENTLICH.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+    const abo = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+    const j = abo.toJSON();
+    await rest("POST", "/rest/v1/oellager_push?on_conflict=endpoint", { user_id: S.sitzung.userId, endpoint: j.endpoint, schluessel: j.keys, geraet: geraetKurz(navigator.userAgent) },
+      { Prefer: "resolution=merge-duplicates" });
+    toast("Meldungen eingeschaltet – du wirst bei neuen Registrierungen benachrichtigt");
+  } catch (e) { toast("Meldungen: " + e.message); }
+}

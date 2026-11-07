@@ -1,7 +1,7 @@
 // Führt gleichzeitig geänderte Stände zusammen – gleiche Regeln wie in der Android-App (cloud/Zusammenfuehren.kt).
 "use strict";
 (function (global) {
-  const MIT_ID = ["lieferanten", "freigaben", "sorten", "faesser", "historie"];
+  const MIT_ID = ["lieferanten", "freigaben", "sorten", "faesser", "historie", "kommentare"];
   const ALLE = [...MIT_ID, "angebote"];
   const zahl = (v) => (typeof v === "number" ? Math.trunc(v) : typeof v === "string" && v.trim() !== "" && !isNaN(v) ? Math.trunc(Number(v)) : null);
   const schluessel = (k, o) => (k === "angebote" ? `${zahl(o.sorteId)}|${o.quelle}` : String(zahl(o.id)));
@@ -62,7 +62,7 @@
         o.ersetztDurchId = neu(so, o.ersetztDurchId);
         o.freigabeIds = o.freigabeIds.map((f) => neu(fr, f));
       }
-      for (const k of ["faesser", "angebote", "historie"]) for (const o of l[k]) o.sorteId = neu(so, o.sorteId);
+      for (const k of ["faesser", "angebote", "historie", "kommentare"]) for (const o of l[k]) o.sorteId = neu(so, o.sorteId);
     }
 
     const erg = {};
@@ -92,9 +92,13 @@
     }));
     const aufSorte = (k) => erg[k].filter((o) => sortIds.has(zahl(o.sorteId)));
     const rest = {};
-    for (const [k, v] of Object.entries(lokal || {})) if (!ALLE.includes(k)) rest[k] = v;
+    // Einstellungen, Lagerplan …: nur übernehmen, was hier geändert wurde, sonst gilt der Cloud-Stand
+    for (const [k, v] of Object.entries(lokal || {})) {
+      if (ALLE.includes(k)) continue;
+      if (!gleich(v, basis ? basis[k] : undefined) || !(remote && k in remote)) rest[k] = v;
+    }
     return { ...(remote || {}), ...rest, lieferanten: erg.lieferanten, freigaben: erg.freigaben, sorten,
-             angebote: aufSorte("angebote"), faesser: aufSorte("faesser"), historie: aufSorte("historie") };
+             angebote: aufSorte("angebote"), faesser: aufSorte("faesser"), historie: aufSorte("historie"), kommentare: aufSorte("kommentare") };
   }
 
   global.Zusammenfuehren = { zusammenfuehren, gleich };
