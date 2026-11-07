@@ -146,6 +146,10 @@ dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
 body.nur-lesen [data-a="sorte-neu"], body.nur-lesen [data-a="fass-neu"], body.nur-lesen [data-v="neu"],
 body.nur-lesen [data-a$="-speichern"], body.nur-lesen [data-a$="-loeschen"], body.nur-lesen [data-a="fass-leer"], body.nur-lesen [data-a="fass-aktiv"] { display: none !important; }
 .banner { margin-top: 12px; padding: 8px 12px; border-radius: 12px; background: rgba(31,78,95,.12); font-size: 13px; }
+.geteilt { display: grid; grid-template-columns: minmax(320px, 1fr) 1.5fr; gap: 14px; align-items: start; }
+.geteilt .detail { position: sticky; top: 84px; margin-top: 12px; max-height: calc(100vh - 180px); overflow: auto; }
+.gruppe.gewaehlt { outline: 2px solid var(--primary); }
+@media (min-width: 1000px) { .huelle, .kopf { max-width: 1320px; } }
 @media (min-width: 760px) {
   .raster-gruppen { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 }
@@ -182,7 +186,7 @@ const S = {
   ansicht: "anmelden", standorte: [], meine: new Set(), aenderbar: new Set(), ich: null, nutzer: [], quellLieferanten: [],
   standort: Number(localStorage.getItem("oel_standort")) || null, meldung: "", laeuft: false,
   tab: "lager", kat: "OEL", offen: null, suche: "", ungespeichert: false, speichert: false, fehler: "",
-  brutto: localStorage.getItem("oel_brutto") === "1", mwst: 19
+  preisModus: localStorage.getItem("oel_preis") || (localStorage.getItem("oel_brutto") === "1" ? "brutto" : "netto"), mwst: 19
 };
 
 // ---------- Hilfen ----------
@@ -190,7 +194,11 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const eur = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" });
 const fmtEur = (v) => eur.format(v);
-const fmtP = (netto) => fmtEur(S.brutto ? netto * (1 + S.mwst / 100) : netto);
+const aufschlag = () => Number(S.daten?.einstellungen?.aufschlagProzent) || 0;
+const preisWert = (netto) => S.preisModus === "kunde" ? netto * (1 + aufschlag() / 100) * (1 + S.mwst / 100)
+  : S.preisModus === "brutto" ? netto * (1 + S.mwst / 100) : netto;
+const fmtP = (netto) => fmtEur(preisWert(netto));
+const PREIS_TEXT = { netto: "Netto", brutto: "Brutto", kunde: "Kunde" };
 const fmtZahl = (v) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100).replace(".", ","));
 function zahl(text) {
   const t = String(text ?? "").replace(/[€\s]/g, "");
@@ -239,6 +247,7 @@ function badge(marke) {
   return `<span class="badge" style="background:${f}2e;color:${f}">${esc(k.toUpperCase())}</span>`;
 }
 function toast(text) {
+  document.querySelectorAll(".toast").forEach((x) => x.remove());
   const t = document.createElement("div");
   t.className = "toast"; t.textContent = text; t.setAttribute("role", "status");
   document.body.appendChild(t);
@@ -444,7 +453,7 @@ function kopfZeichnen() {
     ${S.sitzung && S.ansicht === "app" ? `
       <button class="icon" data-a="standort-wechseln" title="Standort wechseln" aria-label="Standort wechseln">⌖</button>
       <button class="icon" data-a="entwickler" title="Entwicklermenü" aria-label="Entwicklermenü">⚙${wartendeAnzahl() ? `<span class="zaehler">${wartendeAnzahl()}</span>` : ""}</button>
-      <button class="icon" data-a="brutto" title="Netto/Brutto umschalten" aria-label="Netto/Brutto umschalten">${S.brutto ? "Brutto" : "Netto"}</button>
+      <button class="icon" data-a="brutto" title="Preisanzeige: Einkauf netto, Einkauf brutto oder Kundenpreis" aria-label="Preisanzeige umschalten">${PREIS_TEXT[S.preisModus]}</button>
       <button class="icon" data-a="thema" title="Hell/Dunkel" aria-label="Hell oder dunkel">◐</button>
       <button class="icon" data-a="neu-laden" title="Neu laden" aria-label="Neu laden">⟳</button>
       <button class="icon" data-a="abmelden" title="Abmelden" aria-label="Abmelden">⎋</button>` : S.sitzung ? `
@@ -471,6 +480,7 @@ function zeichnen() {
     html += `<div class="seg" style="margin-top:12px">${Object.entries(KATEGORIEN)
       .map(([k, v]) => `<button aria-pressed="${S.kat === k}" data-a="kat" data-v="${k}">${v.titel}</button>`).join("")}</div>`;
   }
+  if (S.preisModus === "kunde") html += `<div class="banner">🏷️ Kundenpreise: Einkauf + ${fmtZahl(aufschlag())} % Aufschlag + ${S.mwst} % MwSt.</div>`;
   if (typeof S.offline === "string") html += `<div class="banner">📴 Offline – Stand vom ${new Date(S.offline).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, nur lesen. <button class="knopf klein" data-a="neu-laden">Erneut verbinden</button></div>`;
   else if (S.offline) html += `<div class="banner">📴 Offline – nur lesen</div>`;
   else if (!darfAendern()) html += `<div class="banner">🔒 Nur Leserechte an diesem Standort</div>`;
@@ -591,7 +601,9 @@ function verwaltungDialog() {
           <button class="knopf klein gefahr" data-a="standort-entfernen" data-v="${x.id}">Löschen</button>
         </div></div>`;
     }).join("") || `<div class="leer">Noch keine Standorte.</div>`}</div>
-    <button class="knopf" data-a="vergleich" style="margin-top:8px">Standortvergleich: Bestandswert und Literpreise</button>
+    <div class="reihe" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+      <button class="knopf" data-a="vergleich">Standortvergleich</button>
+      <button class="knopf" data-a="sicherungen">Sicherungen</button></div>
     <div class="abschnitt-titel">Neuer Standort</div>
     <input type="text" id="neuer-standort" placeholder="Name, z. B. Werkstatt Nord" value="${esc(S.neuerName || "")}">
     ${S.standorte.length ? `<label class="feld"><span>Lieferanten übernehmen von</span><select id="quelle" data-a="quelle-waehlen">
@@ -620,6 +632,16 @@ function verwaltungDialog() {
       </div>`).join("")}</div>
     ${darstellung}`,
     `<button class="knopf haupt" data-a="schliessen">Fertig</button>`);
+}
+function sicherungenDialog() {
+  const gruppen = new Map();
+  for (const x of S.sicherungen) { if (!gruppen.has(x.standort_id)) gruppen.set(x.standort_id, []); gruppen.get(x.standort_id).push(x); }
+  dialog("Sicherungen", `<p class="neben" style="margin:0">Jeden Sonntag früh wird jeder Standort automatisch gesichert (die letzten 12 bleiben). Beim Zurückholen wird der aktuelle Stand vorher selbst gesichert.</p>
+    <button class="knopf haupt" data-a="jetzt-sichern" style="justify-self:start">Jetzt sichern</button>
+    ${[...gruppen].map(([sid, l]) => `<div class="abschnitt-titel">${esc(S.standorte.find((y) => y.id === sid)?.name || "Standort " + sid)}</div><div class="glas">${l.map((x) =>
+      `<div class="liste-zeile" style="cursor:default"><div style="flex:1"><b>${new Date(x.erstellt).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</b>
+        <div class="neben">${esc(x.art)} · Version ${x.version}</div></div><button class="knopf klein" data-a="sicherung-zurueck" data-v="${x.id}">Zurückholen</button></div>`).join("")}</div>`).join("") || `<div class="leer">Noch keine Sicherungen.</div>`}`,
+    `<button class="knopf" data-a="zurueck-entwickler">Zurück</button><button class="knopf haupt" data-a="schliessen">Fertig</button>`);
 }
 function vergleichDialog(rows) {
   S.vergleichRows = rows; const kat = S.vergleichKat || "OEL";
@@ -739,7 +761,7 @@ function summenHtml(sorten, faesser) {
   return `<div class="raster3" style="margin-top:12px">
     <div class="glas kachel-zahl"><div class="l">Sorten</div><div class="w">${sorten.length}</div></div>
     <div class="glas kachel-zahl"><div class="l">Fässer</div><div class="w">${faesser.length}</div></div>
-    <div class="glas kachel-zahl akzent"><div class="l">Ø Literpreis ${S.brutto ? "brutto" : "netto"}</div><div class="w">${sch != null ? fmtP(sch) : "–"}</div></div>
+    <div class="glas kachel-zahl akzent"><div class="l">Ø Literpreis ${S.preisModus === "kunde" ? "Kundenpreis" : S.preisModus}</div><div class="w">${sch != null ? fmtP(sch) : "–"}</div></div>
   </div>`;
 }
 
@@ -752,6 +774,7 @@ function lagerHtml() {
   const sorten = sortenDer(S.kat).filter((s) => s.aktiv !== false);
   let html = summenHtml(sorten, alle);
   html += `<div class="reihe" style="margin-top:12px"><input type="search" placeholder="Suchen: Marke, Sorte, Freigabe, Lagerplatz" data-a="suche" value="${esc(S.suche)}">
+    ${SPRACHE ? `<button class="knopf" data-a="sprache" title="Sprachsuche" aria-label="Sprachsuche">🎤</button>` : ""}
     <button class="knopf haupt" data-a="sorte-neu">+ Sorte</button></div>
     <button class="knopf" data-a="fahrzeug" style="width:100%;margin-top:10px">🚗 Welches Öl passt? – nach Fahrzeug</button>`;
   const q = S.suche.trim().toLowerCase();
@@ -760,14 +783,17 @@ function lagerHtml() {
     .some((t) => String(t || "").toLowerCase().includes(q));
   const gefiltert = gs.map((g) => ({ ...g, sorten: g.sorten.filter(passt) })).filter((g) => g.sorten.length);
   if (!gefiltert.length) return html + `<div class="glas leer" style="margin-top:12px">${q ? "Keine Treffer." : `Noch keine ${KATEGORIEN[S.kat].titel}-Sorten. Lege oben eine an.`}</div>`;
-  html += `<div class="stapel raster-gruppen">`;
+  // Tablet/PC: Liste links, Details der gewählten Viskosität rechts
+  const geteilt = istBreit();
+  const auswahl = geteilt ? (gefiltert.find((g) => g.key === S.offen) || gefiltert[0]) : null;
+  html += geteilt ? `<div class="geteilt"><div class="stapel" style="margin-top:12px">` : `<div class="stapel raster-gruppen">`;
   for (const g of gefiltert) {
     const f = gruppenFarbe(g.key, S.kat);
-    const offen = q || S.offen === g.key;
+    const offen = geteilt ? auswahl === g : (q || S.offen === g.key);
     const marken = [...new Set(g.sorten.map((s) => s.marke || s.name).filter(Boolean))].join(" · ");
     const glp = g.faesser.map(literpreis);
     const ab = glp.length ? Math.min(...glp) : null, bis = glp.length ? Math.max(...glp) : null;
-    html += `<div class="glas gruppe">
+    html += `<div class="glas gruppe ${geteilt && offen ? "gewaehlt" : ""}">
       <div class="gruppe-kopf" data-a="gruppe" data-v="${esc(g.key)}" role="button" tabindex="0" aria-expanded="${!!offen}">
         <span class="streifen" style="background:${f}"></span>
         <div class="bestand" style="background:${f}2e"><b style="color:${f}">${g.faesser.length}</b><span>${g.faesser.length === 1 ? "Fass" : "Fässer"}</span></div>
@@ -779,11 +805,19 @@ function lagerHtml() {
         <div class="preis ${ab != null ? farbe(ab) : ""}">${ab == null ? `<span class="neben">Kein Fass</span>` :
           `${ab === bis ? "" : `<div class="neben" style="font-weight:400">ab</div>`}<div class="preis-gross">${fmtP(ab)}</div><div class="neben" style="font-weight:400">pro Liter${ab !== bis ? " · bis " + fmtP(bis) : ""}</div>`}</div>
       </div>
-      ${offen ? `<div class="innen">${g.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div>` : ""}
+      ${offen && !geteilt ? `<div class="innen">${g.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div>` : ""}
     </div>`;
+  }
+  if (geteilt) {
+    const f = gruppenFarbe(auswahl.key, S.kat);
+    html += `</div><div class="glas detail"><div class="reihe" style="padding:14px 16px 4px"><span class="streifen" style="background:${f};min-height:28px"></span>
+      <b style="font-size:22px;color:${f}">${esc(auswahl.titel)}</b><span class="neben">${auswahl.sorten.length} Sorten · ${auswahl.faesser.length} Fässer</span></div>
+      <div class="innen" style="border-top:0;padding-left:16px">${auswahl.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div></div></div>`;
+    return html;
   }
   return html + `</div>`;
 }
+const istBreit = () => window.innerWidth >= 1000;
 
 function sorteImLagerHtml(s, farbe) {
   const fs = faesserVon(s.id).sort((a, b) => String(a.lagerplatz).localeCompare(String(b.lagerplatz), "de"));
@@ -933,6 +967,14 @@ function auswertungHtml() {
 }
 
 function stammHtml() {
+  const verkauf = `<div class="abschnitt-titel">Verkaufspreis</div><div class="glas" style="padding:12px 16px">
+    <div class="reihe"><label class="feld" style="flex:1"><span>Aufschlag auf den Einkaufspreis für ${esc(standortName() || "diesen Standort")} (%)</span>
+      <input type="text" id="aufschlag" inputmode="decimal" value="${fmtZahl(aufschlag())}" ${darfAendern() ? "" : "disabled"}></label>
+      <button class="knopf haupt" data-a="aufschlag-speichern" style="align-self:end">Speichern</button></div>
+    <div class="neben" style="margin-top:6px">Kundenpreis = Einkauf netto + Aufschlag + ${S.mwst} % MwSt. Anzeige über den Knopf oben (Netto → Brutto → Kunde). Gilt für alle Nutzer dieses Standorts.</div></div>`;
+  return verkauf + stammHtmlRest();
+}
+function stammHtmlRest() {
   const lief = [...S.daten.lieferanten].sort((a, b) => a.name.localeCompare(b.name, "de"));
   const fr = S.daten.freigaben.filter((f) => !f.kategorie || f.kategorie === S.kat)
     .sort((a, b) => a.hersteller.localeCompare(b.hersteller, "de") || a.bezeichnung.localeCompare(b.bezeichnung, "de"));
@@ -947,6 +989,26 @@ function stammHtml() {
     return `<div class="liste-zeile" data-a="freigabe" data-v="${f.id}" role="button" tabindex="0"><div style="flex:1"><b>${esc(f.bezeichnung)}</b><div class="neben">${esc(f.hersteller)}</div></div><span class="neben">${n} ${n === 1 ? "Sorte" : "Sorten"}</span></div>`;
   }).join("") || `<div class="leer">Noch keine Freigaben.</div>`;
   return html + `</div><button class="knopf" style="margin-top:8px" data-a="freigabe" data-v="neu">+ Freigabe</button>`;
+}
+
+// ---------- Sprachsuche (Chrome/Edge/Safari) ----------
+const SPRACHE = window.SpeechRecognition || window.webkitSpeechRecognition;
+function sprachZuSuche(text) {
+  let t = text.toLowerCase();
+  const zahlen = { null: "0", fünf: "5", zehn: "10", fünfzehn: "15", zwanzig: "20", dreißig: "30", vierzig: "40", fünfzig: "50", sechzig: "60" };
+  for (const [w, z] of Object.entries(zahlen)) t = t.replace(new RegExp("(^|\\s)" + w + "(?=\\s|$)", "g"), "$1" + z);
+  let m = t.match(/(\d{1,2})\s*-?\s*w\s*-?\s*(\d{2})/);
+  if (m) return `${m[1]}W-${m[2]}`;
+  m = t.match(/\bg\s*(\d{2})\s*(evo|plus plus|plus|\+\+|\+)?/);
+  if (m) return "G" + m[1] + ({ evo: "evo", "plus plus": "++", "++": "++", plus: "+", "+": "+" }[m[2]] || "");
+  const fuell = new Set("welches welcher welche haben hab wir gibt es noch da öl oel motoröl das der die im lager zeig zeige mir suche such nach ein eine wo ist steht liegt von mit bitte vorrätig auf an".split(" "));
+  return t.replace(/[?!.,]/g, " ").split(/\s+/).filter((w) => w && !fuell.has(w)).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+function spracheStarten() {
+  const r = new SPRACHE(); r.lang = "de-DE"; r.interimResults = false; r.maxAlternatives = 1;
+  r.onresult = (e) => { S.suche = sprachZuSuche(e.results[0][0].transcript); S.offen = null; zeichnen(); toast("Gesucht: " + S.suche); };
+  r.onerror = (e) => toast(e.error === "not-allowed" ? "Mikrofon nicht erlaubt" : "Nichts verstanden – bitte nochmal");
+  r.start(); toast("Sprich jetzt … z. B. „Welches 5W-30 haben wir?“");
 }
 
 // ---------- Dialoge ----------
@@ -980,14 +1042,74 @@ function sorteDialog(s) {
     <div class="feld"><span class="neben">Herstellerfreigaben</span><div class="chips" id="d-fr">
       ${fr.map((f) => `<button type="button" class="chip" data-fid="${f.id}" aria-pressed="${gewaehlt.has(f.id)}">${esc(f.bezeichnung)}</button>`).join("") || `<span class="neben">Noch keine Freigaben (Stammdaten).</span>`}</div></div>
     <label class="reihe"><input type="checkbox" id="d-nach" ${s.nachbestellen ? "checked" : ""}> Auf die Nachbestell-Liste</label>
+    ${neu ? "" : preisentwicklungHtml(s.id)}
+    ${neu ? "" : `<div class="feld"><span class="neben">Fotos und Datenblätter</span><div id="blaetter" class="chips"><span class="neben">Wird geladen …</span></div>
+      ${darfAendern() ? `<label class="knopf klein" style="justify-self:start;cursor:pointer">+ Foto oder PDF<input type="file" id="blatt-datei" accept="image/*,application/pdf" capture="environment" hidden></label>` : ""}</div>`}
     <label class="feld"><span>Notiz</span><textarea id="d-notiz" rows="2">${esc(s.notiz)}</textarea></label>`,
     `${neu ? "" : `<button class="knopf gefahr" data-a="sorte-loeschen" data-v="${s.id}">Löschen</button>`}
      <button class="knopf" data-a="schliessen">Abbrechen</button><button class="knopf haupt" data-a="sorte-speichern" data-v="${neu ? 0 : s.id}">Speichern</button>`);
+  if (!neu) {
+    S.blattSorte = s.id; blaetterLaden(s.id);
+    $("#blatt-datei")?.addEventListener("change", async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const stempel = new Date().toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "");
+      const basis = blattName(f.name.replace(/\.[^.]+$/, "")).slice(0, 40) || "Datenblatt";
+      const endung = (f.name.match(/\.([A-Za-z0-9]{2,5})$/) || [, f.type === "application/pdf" ? "pdf" : "jpg"])[1].toLowerCase();
+      toast("Wird hochgeladen …");
+      try { await speicher("POST", `/storage/v1/object/datenblaetter/${S.standort}/${s.id}/${encodeURIComponent(`${basis}_${stempel}.${endung}`)}`, f, f.type || "application/octet-stream"); toast("Für alle Nutzer gespeichert"); }
+      catch (err) { toast(err.message); }
+      blaetterLaden(s.id);
+    });
+  }
   $("#d-fr").addEventListener("click", (e) => {
     const b = e.target.closest(".chip"); if (!b) return;
     b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
   });
 }
+/** Einkaufspreise je Liter über die Lieferungen als kleines Liniendiagramm. */
+function preisentwicklungHtml(sorteId) {
+  const h = S.daten.historie.filter((x) => x.sorteId === sorteId && x.quelle === "EINKAUF").sort((a, b) => a.zeitpunkt - b.zeitpunkt);
+  if (h.length < 2) return h.length ? `<div class="neben">Einkauf bisher: ${fmtP(h[0].literpreis)} / L (eine Lieferung)</div>` : "";
+  const w = 300, ht = 70, min = Math.min(...h.map((x) => x.literpreis)), max = Math.max(...h.map((x) => x.literpreis));
+  const t0 = h[0].zeitpunkt, t1 = h.at(-1).zeitpunkt;
+  const pt = (x) => [(t1 === t0 ? w / 2 : (x.zeitpunkt - t0) / (t1 - t0) * (w - 10) + 5), (max === min ? ht / 2 : ht - 6 - (x.literpreis - min) / (max - min) * (ht - 12))];
+  const pfad = h.map((x, i) => (i ? "L" : "M") + pt(x).map((v) => v.toFixed(1)).join(" ")).join(" ");
+  const diff = (h.at(-1).literpreis / h[0].literpreis - 1) * 100;
+  return `<div class="feld"><span class="neben">Preisentwicklung Einkauf (${h.length} Lieferungen)</span>
+    <svg viewBox="0 0 ${w} ${ht}" style="width:100%;height:70px;background:var(--feld);border-radius:12px" role="img" aria-label="Preisentwicklung">
+      <path d="${pfad}" fill="none" stroke="var(--primary)" stroke-width="2.5" stroke-linejoin="round"/>
+      ${h.map((x) => { const [a, b] = pt(x); return `<circle cx="${a.toFixed(1)}" cy="${b.toFixed(1)}" r="3.5" fill="var(--primary)"><title>${new Date(x.zeitpunkt).toLocaleDateString("de-DE")}: ${fmtP(x.literpreis)}/L</title></circle>`; }).join("")}
+    </svg>
+    <div class="neben">${new Date(t0).toLocaleDateString("de-DE")}: ${fmtP(h[0].literpreis)}/L → ${new Date(t1).toLocaleDateString("de-DE")}: ${fmtP(h.at(-1).literpreis)}/L
+      <b style="color:${diff > 0.5 ? "var(--teuer)" : diff < -0.5 ? "var(--gut)" : "inherit"}">(${diff > 0 ? "+" : ""}${Math.round(diff)} %)</b></div></div>`;
+}
+
+// ---------- Fotos und Datenblätter (Supabase Storage, Ordner <standort>/<sorte>/) ----------
+const blattName = (n) => n.replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/Ä/g, "Ae").replace(/Ö/g, "Oe").replace(/Ü/g, "Ue").replace(/ß/g, "ss").replace(/[^A-Za-z0-9._-]/g, "_");
+async function speicher(methode, pfad, body, typ) {
+  const h = { apikey: SB_KEY, Authorization: "Bearer " + (await token()) };
+  if (typ) h["Content-Type"] = typ;
+  if (methode === "POST" && pfad.startsWith("/storage/v1/object/datenblaetter/")) h["x-upsert"] = "true";
+  const r = await netz(SB_URL + pfad, { method: methode, headers: h, body });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(r.status === 413 || /size/i.test(t) ? "Datei zu groß (max. 10 MB)" : /mime/i.test(t) ? "Nur Fotos und PDFs möglich" : /security|403/.test(t + r.status) ? "Keine Berechtigung" : "Fehler " + r.status);
+  }
+  return r;
+}
+async function blaetterLaden(sorteId) {
+  const box = $("#blaetter"); if (!box) return;
+  try {
+    const r = await speicher("POST", "/storage/v1/object/list/datenblaetter", JSON.stringify({ prefix: `${S.standort}/${sorteId}`, limit: 200, offset: 0 }), "application/json");
+    const liste = (await r.json()).filter((x) => x.id);
+    if (!$("#blaetter")) return;
+    box.innerHTML = liste.length ? liste.map((x) => `<span class="chip" style="display:inline-flex;gap:6px;align-items:center">
+        <a href="#" data-a="blatt-oeffnen" data-v="${esc(x.name)}" style="color:inherit">${/\.pdf$/i.test(x.name) ? "📄" : "🖼️"} ${esc(x.name.replace(/_\d{4}-\d{2}-\d{2}_\d{6}/, ""))}</a>
+        ${darfAendern() ? `<button type="button" class="icon" style="padding:0 2px;font-size:13px" data-a="blatt-loeschen" data-v="${esc(x.name)}" aria-label="Löschen">✕</button>` : ""}</span>`).join("")
+      : `<span class="neben">Noch keine – z. B. Etikett oder Datenblatt fotografieren.</span>`;
+  } catch (e) { box.innerHTML = `<span class="neben">${esc(e.message)}</span>`; }
+}
+
 function sorteSpeichern(id) {
   const name = wert("d-name"), marke = wert("d-marke");
   if (!name && !marke) { toast("Bitte Marke oder Produktname eintragen"); return; }
@@ -1059,8 +1181,11 @@ function fassSpeichern(id, sorteId) {
   let f = S.daten.faesser.find((x) => x.id === id);
   if (!f) { f = { id: naechsteId(S.daten.faesser), sorteId }; S.daten.faesser.push(f); }
   Object.assign(f, { lagerplatz: wert("f-platz"), gebindeL: g, preisFass, lieferdatum: wert("f-datum"), notiz: wert("f-notiz") });
+  const vorher = id === 0 ? S.daten.historie.filter((h) => h.sorteId === f.sorteId && h.quelle === "EINKAUF").sort((a, b) => b.zeitpunkt - a.zeitpunkt)[0] : null;
   preisMerken(f.sorteId, "EINKAUF", preisFass, g);
-  dlg.close(); geaendert(); toast("Fass gespeichert");
+  dlg.close(); geaendert();
+  const plus = vorher && vorher.literpreis > 0 ? (preisFass / g / vorher.literpreis - 1) * 100 : 0;
+  toast(plus >= 10 ? `Achtung: ${Math.round(plus)} % teurer als die letzte Lieferung (${fmtEur(vorher.literpreis)} → ${fmtEur(preisFass / g)} je Liter netto)` : "Fass gespeichert");
 }
 
 function angebotDialog(sorteId, quelle) {
@@ -1119,8 +1244,13 @@ document.addEventListener("click", async (e) => {
   switch (a) {
     case "tab": S.tab = v; S.suche = ""; zeichnen(); window.scrollTo(0, 0); break;
     case "kat": S.kat = v; S.offen = null; zeichnen(); break;
-    case "gruppe": S.offen = S.offen === v ? null : v; zeichnen(); break;
-    case "brutto": S.brutto = !S.brutto; localStorage.setItem("oel_brutto", S.brutto ? "1" : "0"); zeichnen(); break;
+    case "gruppe": S.offen = istBreit() ? v : (S.offen === v ? null : v); zeichnen(); break;
+    case "brutto": {
+      S.preisModus = { netto: "brutto", brutto: "kunde", kunde: "netto" }[S.preisModus] || "netto";
+      localStorage.setItem("oel_preis", S.preisModus); zeichnen();
+      toast({ netto: "Einkaufspreise netto", brutto: "Einkaufspreise brutto", kunde: `Kundenpreise (+${fmtZahl(aufschlag())} % Aufschlag, inkl. MwSt.)` }[S.preisModus]);
+      break;
+    }
     case "protokoll-neu": S.protokollFuer = null; zeichnen(); break;
     case "zu-registrieren": S.ansicht = "registrieren"; S.meldung = ""; await standorteLaden(); zeichnen(); break;
     case "zu-anmelden": S.ansicht = "anmelden"; S.meldung = ""; zeichnen(); break;
@@ -1161,6 +1291,28 @@ document.addEventListener("click", async (e) => {
       break;
     }
     case "fahrzeug": fahrzeugDialog(); break;
+    case "sprache": spracheStarten(); break;
+    case "blatt-oeffnen": {
+      e.preventDefault();
+      const fenster = window.open("", "_blank");
+      try {
+        const r = await speicher("GET", `/storage/v1/object/authenticated/datenblaetter/${S.standort}/${S.blattSorte}/${encodeURIComponent(v)}`);
+        const url = URL.createObjectURL(await r.blob());
+        if (fenster) fenster.location = url; else location.href = url;
+      } catch (err) { fenster?.close(); toast(err.message); }
+      break;
+    }
+    case "blatt-loeschen":
+      if (confirm("Datei für alle löschen?")) {
+        try { await speicher("DELETE", `/storage/v1/object/datenblaetter/${S.standort}/${S.blattSorte}/${encodeURIComponent(v)}`); } catch (err) { toast(err.message); }
+        blaetterLaden(S.blattSorte);
+      }
+      break;
+    case "aufschlag-speichern": {
+      const p = zahl(wert("aufschlag"));
+      if (p == null || p < 0 || p > 1000) { toast("Bitte einen Aufschlag zwischen 0 und 1000 % eingeben"); return; }
+      S.daten.einstellungen = { ...(S.daten.einstellungen || {}), aufschlagProzent: p }; geaendert(); toast("Aufschlag gespeichert"); break;
+    }
     case "fz-marke": S.fz = { marke: v, idx: null }; fahrzeugDialog(); break;
     case "fz-motor": S.fz.idx = nr; fahrzeugDialog(); break;
     case "fahrzeug-sorte": dlg.close(); sorteDialog(S.daten.sorten.find((x) => x.id === nr)); break;
@@ -1171,6 +1323,28 @@ document.addEventListener("click", async (e) => {
       try {
         const rows = await rest("GET", "/rest/v1/oellager_bestand?select=standort_id,daten");
         vergleichDialog(rows);
+      } catch (err) { toast(err.message); }
+      break;
+    }
+    case "sicherungen": {
+      try { S.sicherungen = await rest("GET", "/rest/v1/oellager_sicherung?select=id,standort_id,erstellt,art,version&order=erstellt.desc&limit=200"); sicherungenDialog(); }
+      catch (err) { toast(err.message); }
+      break;
+    }
+    case "jetzt-sichern":
+      try { const n = await rest("POST", "/rest/v1/rpc/oellager_jetzt_sichern", {}); toast(`${n} Standort(e) gesichert`);
+        S.sicherungen = await rest("GET", "/rest/v1/oellager_sicherung?select=id,standort_id,erstellt,art,version&order=erstellt.desc&limit=200"); sicherungenDialog(); }
+      catch (err) { toast(err.message); }
+      break;
+    case "sicherung-zurueck": {
+      const x = S.sicherungen.find((y) => y.id === nr); if (!x) return;
+      const name = S.standorte.find((y) => y.id === x.standort_id)?.name || "Standort " + x.standort_id;
+      if (!confirm(`Lager „${name}“ für alle Nutzer auf den Stand vom ${new Date(x.erstellt).toLocaleString("de-DE")} zurücksetzen?\nDer jetzige Stand wird vorher gesichert.`)) return;
+      try {
+        await rest("POST", "/rest/v1/rpc/oellager_wiederherstellen", { p_sicherung: nr });
+        toast("Sicherung wiederhergestellt");
+        if (x.standort_id === S.standort && S.ansicht === "app") { S.ungespeichert = false; await laden(); zeichnen(); }
+        S.sicherungen = await rest("GET", "/rest/v1/oellager_sicherung?select=id,standort_id,erstellt,art,version&order=erstellt.desc&limit=200"); sicherungenDialog();
       } catch (err) { toast(err.message); }
       break;
     }
@@ -1341,6 +1515,8 @@ document.addEventListener("visibilitychange", async () => {
     try { await laden(); zeichnen(); } catch (e) { /* offline */ }
   }
 });
+let breitVorher = istBreit();
+window.addEventListener("resize", () => { if (istBreit() !== breitVorher) { breitVorher = istBreit(); if (S.ansicht === "app" && !dlg.open) zeichnen(); } });
 window.addEventListener("online", async () => {
   if (S.offline && S.ansicht === "app") { try { await verwaltungLaden(); await laden(); zeichnen(); toast("Wieder online"); } catch (e) { /* noch nicht */ } }
 });
