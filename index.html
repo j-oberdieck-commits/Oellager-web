@@ -71,7 +71,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 header { position: sticky; top: 0; z-index: 5; padding: calc(10px + env(safe-area-inset-top)) 16px 8px;
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .kopf { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
-.kopf h1 { font-size: 22px; margin: 0; flex: 1; text-wrap: balance; }
+.kopf h1 { font-size: 20px; line-height: 1.2; margin: 0; flex: 1; min-width: 0; text-wrap: balance; }
 .kopf .unter { font-size: 12px; color: var(--neben); font-weight: 400; display: block; }
 .glas { background: var(--glas); border: 1px solid var(--kante); border-radius: 20px; box-shadow: var(--schatten);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); position: relative; overflow: hidden; }
@@ -105,6 +105,10 @@ label.feld > span { padding-left: 2px; }
 .streifen { width: 6px; align-self: stretch; border-radius: 3px; min-height: 48px; }
 .gruppe-titel { font-size: 22px; font-weight: 750; }
 .neben { color: var(--neben); font-size: 13px; }
+.bestand { flex: none; min-width: 52px; padding: 6px 8px; border-radius: 14px; text-align: center; line-height: 1.1; }
+.bestand b { display: block; font-size: 22px; }
+.bestand span { font-size: 11px; color: var(--neben); }
+.preis-gross { font-size: 26px; line-height: 1.1; }
 .preis { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .preis.gut { color: var(--gut); } .preis.teuer { color: var(--teuer); }
 .innen { padding: 0 16px 12px 30px; border-top: 1px solid var(--linie); cursor: default; }
@@ -403,9 +407,9 @@ function preisMerken(sorteId, quelle, preisGebinde, gebindeL) {
 // ---------- Oberfläche ----------
 function kopfZeichnen() {
   const st = S.ansicht !== "app" ? "" : S.speichert ? "speichert …" : S.ungespeichert ? "nicht gespeichert" :
-    S.fehler ? "Fehler: " + S.fehler : S.daten ? [standortName(), "gespeichert", S.ich?.name || S.sitzung?.email].filter(Boolean).join(" · ") : "";
+    S.fehler ? "Fehler: " + S.fehler : S.daten ? ["gespeichert", S.ich?.name || S.sitzung?.email].filter(Boolean).join(" · ") : "";
   $("#kopf").innerHTML = `
-    <h1>Öllager<span class="unter status ${S.fehler ? "fehler" : ""}">${esc(st)}</span></h1>
+    <h1>${S.ansicht === "app" && standortName() ? "Lager " + esc(standortName()) : "Öllager"}<span class="unter status ${S.fehler ? "fehler" : ""}">${esc(st)}</span></h1>
     ${S.sitzung && S.ansicht === "app" ? `
       <button class="icon" data-a="standort-wechseln" title="Standort wechseln" aria-label="Standort wechseln">⌖</button>
       <button class="icon" data-a="entwickler" title="Entwicklermenü" aria-label="Entwicklermenü">⚙</button>
@@ -604,13 +608,14 @@ function lagerHtml() {
     html += `<div class="glas gruppe">
       <div class="gruppe-kopf" data-a="gruppe" data-v="${esc(g.key)}" role="button" tabindex="0" aria-expanded="${!!offen}">
         <span class="streifen" style="background:${f}"></span>
+        <div class="bestand" style="background:${f}2e"><b style="color:${f}">${g.faesser.length}</b><span>${g.faesser.length === 1 ? "Fass" : "Fässer"}</span></div>
         <div style="flex:1;min-width:0">
           <div class="gruppe-titel" style="color:${f}">${esc(g.titel)}</div>
           <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(marken || "Ohne Marke")}</div>
           <div class="neben">${g.sorten.length} ${g.sorten.length === 1 ? "Sorte" : "Sorten"} · ${g.faesser.length} ${g.faesser.length === 1 ? "Fass" : "Fässer"}</div>
         </div>
         <div class="preis ${ab != null ? farbe(ab) : ""}">${ab == null ? `<span class="neben">Kein Fass</span>` :
-          `${ab === bis ? "" : "ab "}${fmtP(ab)}<div class="neben" style="font-weight:400">pro Liter${ab !== bis ? " · bis " + fmtP(bis) : ""}</div>`}</div>
+          `${ab === bis ? "" : `<div class="neben" style="font-weight:400">ab</div>`}<div class="preis-gross">${fmtP(ab)}</div><div class="neben" style="font-weight:400">pro Liter${ab !== bis ? " · bis " + fmtP(bis) : ""}</div>`}</div>
       </div>
       ${offen ? `<div class="innen">${g.sorten.map((s) => sorteImLagerHtml(s, farbe)).join("")}</div>` : ""}
     </div>`;
