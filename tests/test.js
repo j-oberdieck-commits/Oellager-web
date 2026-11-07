@@ -131,7 +131,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.click('[data-a="sorte-neu"]');
   await page.fill("#d-marke", "Liqui Moly"); await page.fill("#d-name", "Top Tec 4200"); await page.fill("#d-visko", "5w-30");
   await page.click('[data-a="sorte-speichern"]');
-  await page.waitForFunction(() => document.querySelector("#kopf").textContent.includes("gespeichert ·"));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
   ok("Gespeichert mit p_standort=1", db.rpc.at(-1).p_standort === 1 && db.bestand[1].daten.sorten[0].viskositaet === "5W-30");
 
   // Gleichzeitige Änderung eines Kollegen → zusammenführen
@@ -139,7 +139,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.click('[data-a="sorte-neu"]');
   await page.fill("#d-marke", "Mobil"); await page.fill("#d-name", "Super 3000"); await page.fill("#d-visko", "5W-40");
   await page.click('[data-a="sorte-speichern"]');
-  await page.waitForFunction(() => document.querySelector("#kopf").textContent.includes("gespeichert ·"));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
   await page.waitForTimeout(300);
   const namen = db.bestand[1].daten.sorten.map((x) => x.marke).sort();
   ok("Zusammengeführt: alle drei Sorten", JSON.stringify(namen) === JSON.stringify(["Castrol", "Liqui Moly", "Mobil"]));
@@ -165,11 +165,11 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.click('#app [data-a="fass-neu"]');
   await page.fill("#f-platz", "A1"); await page.fill("#f-preis", "1456");
   await page.click('[data-a="fass-speichern"]');
-  await page.waitForFunction(() => document.querySelector("#kopf").textContent.includes("gespeichert ·"));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
   ok("Fass im Bestand", (await page.textContent("#app")).includes("A1"));
   await page.click('#app .fass');
   await page.click('[data-a="fass-leer"]');
-  await page.waitForFunction(() => document.querySelector("#kopf").textContent.includes("gespeichert ·"));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
   await page.waitForTimeout(800);
   ok("Fass leer: gespeichert mit leerAm, nicht mehr im Bestand", !!db.bestand[1].daten.faesser.find((f) => f.lagerplatz === "A1")?.leerAm && !(await page.textContent("#app")).includes("Gebinde 208 L"));
   await page.click('[data-a="tab"][data-v="auswertung"]');
@@ -277,14 +277,14 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   // Verkaufspreis: Aufschlag 40 % → Kundenpreis = netto * 1,4 * 1,19
   await page.click('[data-a="tab"][data-v="stamm"]');
   await page.fill("#aufschlag", "40"); await page.click('[data-a="aufschlag-speichern"]');
-  await page.waitForFunction(() => document.querySelector("#kopf").textContent.includes("gespeichert ·"));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
   ok("Aufschlag im Lagerstand gespeichert", db.bestand[1].daten.einstellungen?.aufschlagProzent === 40);
   // Fass mit 7,00 €/L anlegen, dann ein teureres → Warnung
   await page.click('[data-a="tab"][data-v="lager"]');
   if (!(await page.isVisible('#app [data-a="fass-neu"]'))) await page.click('#app [data-a="gruppe"]');
   await page.click('#app [data-a="fass-neu"]');
   await page.fill("#f-groesse", "200"); await page.fill("#f-preis", "1400"); await page.click('[data-a="fass-speichern"]');
-  await page.waitForFunction(() => document.querySelector("#kopf").textContent.includes("gespeichert ·"));
+  await page.locator("#kopf", { hasText: "gespeichert ·" }).waitFor();
   await page.click('#app [data-a="fass-neu"]');
   await page.fill("#f-groesse", "200"); await page.fill("#f-preis", "1600"); await page.click('[data-a="fass-speichern"]');
   await page.waitForSelector("text=14 % teurer als die letzte Lieferung");
@@ -309,7 +309,7 @@ const ok = (n, b) => { console.log((b ? "OK   " : "FEHL ") + n); if (!b) process
   await page.click('[data-a="jetzt-sichern"]');
   await page.waitForSelector("#dialog >> text=manuell");
   await page.click('[data-a="sicherung-zurueck"][data-v="7"]');
-  await page.waitForFunction(() => true); await page.waitForTimeout(500);
+  await page.waitForTimeout(500);
   ok("Sicherung angelegt und zurückgeholt", db.wiederhergestellt === 7);
   await page.click('#dialog [data-a="schliessen"]');
   // Tablet-Ansicht
